@@ -236,8 +236,9 @@ fun HubScreen(
     val hasMovies = v?.any { it.collectionType == "movies" } == true
     val hasSeries = v?.any { it.collectionType == "tvshows" } == true
     // TV aparece si la cuenta tiene canales o si en Emby existe la biblioteca de TV en directo.
-    val hasTv = (tv?.first ?: 0) > 0 || v?.any { it.collectionType == "livetv" } == true
-    val none = !hasMovies && !hasSeries && !hasTv
+    val hasTv = true // TV siempre disponible: canales de Emby o listas M3U / Xtream añadidas a mano
+    val iptvCount = Iptv.list(ctx).size
+    val none = !hasMovies && !hasSeries
 
     val items = buildList {
         if (ready && (hasMovies || none)) {
@@ -259,7 +260,7 @@ fun HubScreen(
         if (ready && hasTv) {
             add(
                 HubItem(
-                    "TV", if ((tv?.first ?: 0) > 0) "${tv?.first} canales en directo" else "Canales en directo", IconTv,
+                    "TV", if ((tv?.first ?: 0) > 0) "${tv?.first} canales en directo" else if (iptvCount > 0) "Tus listas de canales" else "Añade tus canales", IconTv,
                     Color(0xFF0F766E), Color(0xFF22D3EE), tv?.second.orEmpty().mapNotNull { client.logo(it, 120) }, true, onTv,
                 )
             )

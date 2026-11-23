@@ -108,12 +108,18 @@ private fun LivePlayer(client: EmbyClient, ch: Channel, modifier: Modifier) {
     var force by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var buffering by remember { mutableStateOf(true) }
+    val direct = ch.url != null
+    var useAlt by remember { mutableStateOf(false) }
 
-    LaunchedEffect(force) {
+    LaunchedEffect(force, useAlt) {
         plan = null
         error = null
         try {
-            plan = client.planPlayback(ch.asItem(), 0L, force, Prefs.quality(ctx), live = true)
+            plan = if (direct) {
+                PlayPlan(if (useAlt) (ch.alt ?: ch.url!!) else ch.url!!, "DirectPlay", "", "", 0L, emptyList())
+            } else {
+                client.planPlayback(ch.asItem(), 0L, force, Prefs.quality(ctx), live = true)
+            }
         } catch (e: Exception) {
             error = friendlyError(e)
         }
@@ -125,7 +131,7 @@ private fun LivePlayer(client: EmbyClient, ch: Channel, modifier: Modifier) {
             val exo = remember(p) {
                 val http = DefaultHttpDataSource.Factory()
                     .setAllowCrossProtocolRedirects(true)
-                    .setDefaultRequestProperties(mapOf("X-Emby-Token" to (client.session?.token ?: "")))
+                    .setDefaultRequestProperties(if (direct) emptyMap() else mapOf("X-Emby-Token" to (client.session?.token ?: "")))
                 ExoPlayer.Builder(ctx, DefaultRenderersFactory(ctx).setEnableDecoderFallback(true))
                     .setMediaSourceFactory(DefaultMediaSourceFactory(http))
                     .build()
@@ -141,6 +147,8 @@ private fun LivePlayer(client: EmbyClient, ch: Channel, modifier: Modifier) {
                         if (e.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
                             exo.seekToDefaultPosition()
                             exo.prepare()
+                        } else if (direct) {
+                            if (!useAlt && ch.alt != null) useAlt = true else error = "Este canal no está disponible ahora mismo."
                         } else if (!force) {
                             force = true // reintenta dejando que el servidor adapte el canal
                         } else {
@@ -153,11 +161,11 @@ private fun LivePlayer(client: EmbyClient, ch: Channel, modifier: Modifier) {
                     }
                 }
                 exo.addListener(listener)
-                CoroutineScope(Dispatchers.IO).launch { client.report("start", p, ch.id, 0L, false) }
+                if (!direct) CoroutineScope(Dispatchers.IO).launch { client.report("start", p, ch.id, 0L, false) }
                 onDispose {
                     exo.removeListener(listener)
                     exo.release()
-                    CoroutineScope(Dispatchers.IO).launch { client.report("stop", p, ch.id, 0L, false) }
+                    if (!direct) CoroutineScope(Dispatchers.IO).launch { client.report("stop", p, ch.id, 0L, false) }
                 }
             }
             AndroidView(
@@ -240,6 +248,9 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
     var overlay by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf(false) }
     var digits by remember { mutableStateOf("") }
+    var reload by remember { mutableStateOf(0) }
+    var diag by remember { mutableStateOf<String?>(null) }
+    var showIptv by remember { mutableStateOf(false) }
     var browseId by remember { mutableStateOf<String?>(null) }
     var progs by remember { mutableStateOf<Pair<String, List<Program>>?>(null) }
     val now by produceState(System.currentTimeMillis()) {
@@ -265,14 +276,22 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
         }
     }
 
-    LaunchedEffect(Unit) {
-        try {
-            channels = client.channels()
-            val last = Prefs.lastChannel(ctx)
-            idx = channels.indexOfFirst { it.id == last }.coerceAtLeast(0)
+    LaunchedEffect(reload) {
+        loaded = false
+        error = null
+        val emby = try {
+            client.channels()
         } catch (e: Exception) {
             error = friendlyError(e)
+            emptyList()
         }
+        val extra = Iptv.loadAll(ctx).let { l ->
+            l.mapIndexed { i, c -> if (c.number.isBlank()) c.copy(number = (emby.size + i + 1).toString()) else c }
+        }
+        channels = emby + extra
+        val last = Prefs.lastChannel(ctx)
+        idx = channels.indexOfFirst { it.id == last }.coerceAtLeast(0)
+        if (channels.isEmpty()) diag = try { client.liveDiag() } catch (e: Exception) { null }
         loaded = true
     }
 
@@ -290,6 +309,10 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
     // Programación del canal que se está viendo (o del que estás explorando en la lista).
     LaunchedEffect(shownId) {
         val id = shownId ?: return@LaunchedEffect
+        if (id.startsWith("iptv:")) {
+            progs = id to emptyList()
+            return@LaunchedEffect
+        }
         delay(250)
         val l = try {
             client.programs(id)
@@ -339,7 +362,7 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
             .fillMaxSize()
             .background(Color.Black)
             .onKeyEvent { e ->
-                if (e.type != KeyEventType.KeyDown || overlay) return@onKeyEvent false
+                if (e.type != KeyEventType.KeyDown || overlay || channels.isEmpty()) return@onKeyEvent false
                 val d = digitOf(e.key)
                 when {
                     d != null -> {
@@ -366,6 +389,7 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
             .focusable()
             .pointerInput(Unit) { detectTapGestures { overlay = !overlay } }
     ) {
+        if (showIptv) IptvDialog(onClose = { showIptv = false }, onChanged = { reload++ })
         val wide = maxWidth > 700.dp
         val panelW = if (maxWidth > 1000.dp) 460.dp else if (wide) 360.dp else 300.dp
 
@@ -374,11 +398,16 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
         } else if (!loaded) {
             CircularProgressIndicator(color = Amber, modifier = Modifier.align(Alignment.Center))
         } else {
-            Text(
-                error ?: "Esta cuenta no tiene canales de TV.",
-                color = Color.White, textAlign = TextAlign.Center,
-                modifier = Modifier.align(Alignment.Center).padding(32.dp),
-            )
+            Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Aún no tienes canales.\nAñade una lista M3U o Xtream Codes.",
+                    color = Color.White, textAlign = TextAlign.Center,
+                )
+                diag?.let { Text("\nDiagnóstico Emby:\n$it", color = TextMuted, fontSize = 12.sp, textAlign = TextAlign.Center) }
+                Spacer(Modifier.height(16.dp))
+                androidx.compose.material3.Button(onClick = { showIptv = true }) { Text("Añadir canales") }
+                androidx.compose.material3.OutlinedButton(onClick = onExit) { Text("Volver") }
+            }
         }
 
         // Cartel del canal (al cambiar).
@@ -435,6 +464,11 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    item {
+                        androidx.compose.material3.OutlinedButton(onClick = { showIptv = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Añadir o quitar listas (M3U / Xtream)")
+                        }
+                    }
                     items(channels.size, key = { channels[it].id }) { i ->
                         val ch = channels[i]
                         ChannelRow(

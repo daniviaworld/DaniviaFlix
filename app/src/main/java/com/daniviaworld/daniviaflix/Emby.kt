@@ -45,7 +45,10 @@ data class Item(
 
 data class Program(val name: String, val startMs: Long, val endMs: Long, val overview: String)
 
-data class Channel(val id: String, val name: String, val number: String, val logoTag: String?, val now: Program?)
+data class Channel(
+    val id: String, val name: String, val number: String, val logoTag: String?, val now: Program?,
+    val url: String? = null, val logoUrl: String? = null, val alt: String? = null,
+)
 
 /** "2026-11-23T20:00:00.0000000Z" → milisegundos (UTC). */
 internal fun parseIso(s: String?): Long {
@@ -448,6 +451,29 @@ class EmbyClient(ctx: Context) {
         o.optJSONObject("ImageTags")?.str("Primary"), o.optJSONObject("CurrentProgram")?.toProgram(),
     )
 
+    /** Texto de diagnóstico: qué responde Emby a cada vía de TV en directo. */
+    suspend fun liveDiag(): String {
+        suspend fun probe(label: String, path: String, vararg p: Pair<String, String>): String = try {
+            val j = JSONObject(call("GET", u(path, *p)))
+            "$label: ${j.optInt("TotalRecordCount", j.optJSONArray("Items")?.length() ?: 0)}"
+        } catch (e: Exception) {
+            "$label: error (${(e.message ?: "?").take(60)})"
+        }
+        val views = try {
+            val a = JSONObject(call("GET", u("/Users/${uid()}/Views"))).optJSONArray("Items")
+            (0 until (a?.length() ?: 0)).joinToString { a!!.getJSONObject(it).optString("CollectionType").ifEmpty { "?" } }
+        } catch (e: Exception) {
+            "error"
+        }
+        return listOf(
+            "Usuario: ${session?.userName}",
+            "Bibliotecas: $views",
+            probe("LiveTv/Channels", "/LiveTv/Channels", "UserId" to uid(), "Limit" to "5"),
+            probe("Items TvChannel", "/Users/${uid()}/Items", "IncludeItemTypes" to "TvChannel", "Recursive" to "true", "Limit" to "5"),
+            probe("LiveTv/Info", "/LiveTv/Info"),
+        ).joinToString("\n")
+    }
+
     suspend fun channels(): List<Channel> {
         var arr = try {
             JSONObject(call("GET", u("/LiveTv/Channels", "UserId" to uid(), "AddCurrentProgram" to "true", "Limit" to "3000"))).optJSONArray("Items")
@@ -484,6 +510,7 @@ class EmbyClient(ctx: Context) {
     }
 
     fun logo(ch: Channel, maxHeight: Int = 160): String? {
+        ch.logoUrl?.let { return it }
         val s = session ?: return null
         val tag = ch.logoTag ?: return null
         return "${s.server}/emby/Items/${ch.id}/Images/Primary?maxHeight=$maxHeight&quality=90&tag=$tag&api_key=${s.token}"
