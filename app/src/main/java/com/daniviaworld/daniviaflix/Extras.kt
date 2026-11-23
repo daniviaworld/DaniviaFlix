@@ -101,7 +101,7 @@ private fun deviceLines(): List<String> {
 }
 
 @Composable
-fun SettingsScreen(client: EmbyClient, onBack: () -> Unit, onLogout: () -> Unit) {
+fun SettingsScreen(client: EmbyClient, onBack: () -> Unit, onAccounts: () -> Unit, onLogout: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val s = client.session
@@ -126,6 +126,8 @@ fun SettingsScreen(client: EmbyClient, onBack: () -> Unit, onLogout: () -> Unit)
             Text(s?.userName ?: "", fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text(s?.server ?: "", color = TextMuted, fontSize = 13.sp)
             if (server.isNotEmpty()) Text(server, color = TextMuted, fontSize = 13.sp)
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onAccounts) { Text("Cambiar o añadir cuenta") }
 
             Section("Reproducción", 0.dp) {}
             OptionRow(
@@ -152,7 +154,7 @@ fun SettingsScreen(client: EmbyClient, onBack: () -> Unit, onLogout: () -> Unit)
                 }
             }) { Text("Buscar actualización") }
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = onLogout) { Text("Cerrar sesión") }
+            OutlinedButton(onClick = onLogout) { Text("Quitar esta cuenta") }
         }
     }
     update?.let { u -> UpdateDialog(u) { update = null } }

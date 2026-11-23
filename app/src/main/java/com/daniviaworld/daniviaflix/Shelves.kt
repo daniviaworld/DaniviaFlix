@@ -179,11 +179,12 @@ private fun MoodCard(m: Mood, modifier: Modifier, onClick: () -> Unit) {
 
 /** "¿Qué te apetece?": en vez de filas repetidas, eliges según el momento. */
 @Composable
-fun MoodGrid(pad: Dp, onPick: (Mood) -> Unit) {
+fun MoodGrid(pad: Dp, list: List<Mood> = moods, onPick: (Mood) -> Unit) {
     Column(Modifier.padding(horizontal = pad), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        moods.chunked(2).forEach { row ->
+        list.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { m -> MoodCard(m, Modifier.weight(1f)) { onPick(m) } }
+                repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }

@@ -57,27 +57,22 @@ fun App() {
     var phase by remember { mutableStateOf("splash") } // splash | login | main
     var splashDone by remember { mutableStateOf(false) }
     var restored by remember { mutableStateOf<Boolean?>(null) }
-    val stack = remember { mutableStateListOf<Screen>(Screen.Home) }
+    var adding by remember { mutableStateOf(false) } // true = login para añadir otra cuenta
+    var accounts by remember { mutableStateOf<List<Account>>(emptyList()) }
+    var activeIdx by remember { mutableStateOf(0) }
+    val stack = remember { mutableStateListOf<Screen>(Screen.Hub) }
     var crash by remember { mutableStateOf(prefs.getString("lastCrash", null)) }
 
-    // Recupera la sesión guardada (si el servidor responde 401 se pide el login de nuevo).
+    // Recupera las cuentas guardadas y entra directo con la activa (sin esperar a la red).
     LaunchedEffect(Unit) {
-        val token = prefs.getString("token", null)
-        if (token == null) {
+        accounts = Accounts.list(ctx)
+        activeIdx = Accounts.activeIndex(ctx)
+        val a = accounts.getOrNull(activeIdx)
+        if (a == null) {
             restored = false
         } else {
-            client.session = Session(
-                prefs.getString("server", "") ?: "",
-                prefs.getString("userId", "") ?: "",
-                token,
-                prefs.getString("user", "") ?: "",
-            )
-            restored = try {
-                client.views()
-                true
-            } catch (e: Exception) {
-                e.message?.contains("401") != true
-            }
+            client.session = a.toSession()
+            restored = true
         }
     }
     LaunchedEffect(splashDone, restored) {
@@ -92,25 +87,57 @@ fun App() {
             stack.add(Screen.Detail(i))
         }
     }
-    val logout: () -> Unit = {
-        // Se conservan la dirección del servidor y los ajustes; solo se borra la sesión.
-        prefs.edit().remove("token").remove("userId").remove("user").apply()
-        client.session = null
-        stack.clear()
-        stack.add(Screen.Home)
-        phase = "login"
-    }
     val pop: () -> Unit = { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
+
+    // Pasa a otra cuenta y vuelve a la pantalla de inicio.
+    val activate: (Int) -> Unit = { i ->
+        Accounts.setActive(ctx, i)
+        accounts = Accounts.list(ctx)
+        activeIdx = Accounts.activeIndex(ctx)
+        accounts.getOrNull(activeIdx)?.let { client.session = it.toSession() }
+        stack.clear()
+        stack.add(Screen.Hub)
+    }
+
+    // Quita una cuenta. Si era la activa pasa a otra; si no queda ninguna, pide el login.
+    val removeAccount: (Int) -> Unit = { i ->
+        val wasActive = i == activeIdx
+        Accounts.remove(ctx, i)
+        accounts = Accounts.list(ctx)
+        activeIdx = Accounts.activeIndex(ctx)
+        if (accounts.isEmpty()) {
+            client.session = null
+            stack.clear()
+            stack.add(Screen.Hub)
+            adding = false
+            phase = "login"
+        } else if (wasActive) {
+            accounts.getOrNull(activeIdx)?.let { client.session = it.toSession() }
+            stack.clear()
+            stack.add(Screen.Hub)
+        }
+    }
+    val logout: () -> Unit = { removeAccount(activeIdx) }
 
     when (phase) {
         "splash" -> Splash { splashDone = true }
-        "login" -> LoginScreen(client, prefs.getString("server", "") ?: "") { s ->
-            prefs.edit()
-                .putString("server", s.server).putString("userId", s.userId)
-                .putString("token", s.token).putString("user", s.userName)
-                .apply()
+        "login" -> LoginScreen(
+            client, prefs.getString("server", "") ?: "",
+            onCancel = if (adding) {
+                {
+                    // Vuelve a la cuenta que estaba activa.
+                    accounts.getOrNull(activeIdx)?.let { client.session = it.toSession() }
+                    adding = false
+                    phase = "main"
+                }
+            } else null,
+        ) { s ->
+            activeIdx = Accounts.add(ctx, Account(s.server, s.userId, s.token, s.userName))
+            accounts = Accounts.list(ctx)
+            prefs.edit().putString("server", s.server).apply()
             stack.clear()
-            stack.add(Screen.Home)
+            stack.add(Screen.Hub)
+            adding = false
             phase = "main"
         }
         else -> {
@@ -118,15 +145,39 @@ fun App() {
             val current = stack.last()
             key(current) {
                 when (current) {
+                    is Screen.Hub -> HubScreen(
+                        client,
+                        account = accounts.getOrNull(activeIdx),
+                        onMovies = { stack.add(Screen.Home("movies")) },
+                        onSeries = { stack.add(Screen.Home("series")) },
+                        onTv = { stack.add(Screen.Tv) },
+                        onAccounts = { stack.add(Screen.Accounts) },
+                        onSettings = { stack.add(Screen.Settings) },
+                        onAuthError = logout,
+                    )
                     is Screen.Home -> HomeScreen(
                         client,
+                        current.mode,
                         onOpen = open,
                         onPlay = { i, ms -> stack.add(Screen.Player(i, ms)) },
                         onGroup = { g -> stack.add(g) },
                         onSearch = { stack.add(Screen.Search) },
                         onSettings = { stack.add(Screen.Settings) },
+                        onAuthError = logout,
                     )
-                    is Screen.Settings -> SettingsScreen(client, onBack = pop, onLogout = logout)
+                    is Screen.Tv -> TvScreen(client, onExit = pop)
+                    is Screen.Accounts -> AccountsScreen(
+                        accounts, activeIdx, onBack = pop,
+                        onPick = { i -> if (i == activeIdx) pop() else activate(i) },
+                        onAdd = {
+                            adding = true
+                            phase = "login"
+                        },
+                        onRemove = { i -> removeAccount(i) },
+                    )
+                    is Screen.Settings -> SettingsScreen(
+                        client, onBack = pop, onAccounts = { stack.add(Screen.Accounts) }, onLogout = logout,
+                    )
                     is Screen.Search -> SearchScreen(client, onBack = pop, onOpen = open)
                     is Screen.Library -> LibraryScreen(client, current.view, onBack = pop, onOpen = open, onGroup = { g -> stack.add(g) })
                     is Screen.Group -> GroupScreen(client, current, onBack = pop, onOpen = open)

@@ -17,6 +17,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -65,17 +70,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 @Composable
 fun HomeScreen(
     client: EmbyClient,
+    mode: String,
     onOpen: (Item) -> Unit,
     onPlay: (Item, Long) -> Unit,
     onGroup: (Screen.Group) -> Unit,
     onSearch: () -> Unit,
     onSettings: () -> Unit,
+    onAuthError: () -> Unit,
 ) {
     val isTv = rememberIsTv()
     val pad = if (isTv) 48.dp else 16.dp
@@ -89,29 +97,67 @@ fun HomeScreen(
     var favs by remember { mutableStateOf<List<Item>>(emptyList()) }
     var latest by remember { mutableStateOf<List<Item>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var resumeDone by remember { mutableStateOf(false) }
+    var latestDone by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var update by remember { mutableStateOf<UpdateInfo?>(null) }
 
-    // Al abrir, mira en silencio si hay una versión nueva en GitHub y pregunta si quieres instalarla.
-    LaunchedEffect(Unit) { update = Updater.check(ctx) }
-
-    LaunchedEffect(Unit) {
-        try {
-            views = client.views().filter { it.collectionType != "livetv" && it.collectionType != "music" }
-            resume = client.resume()
-            latest = client.latest()
-            favs = try {
-                client.favorites()
-            } catch (e: Exception) {
-                emptyList()
-            }
-        } catch (e: Exception) {
-            error = friendlyError(e)
-        }
-        loading = false
+    val isSeries = mode == "series"
+    val typesForMode = if (isSeries) "Series" else "Movie"
+    fun inMode(i: Item) = if (isSeries) (i.type == "Series" || i.type == "Episode") else (i.type != "Series" && i.type != "Episode")
+    val moodList = moods.filter { m ->
+        if (isSeries) m.kind in setOf("marathon", "kids", "favorites", "random")
+        else m.kind in setOf("short", "epic", "kids", "favorites", "random")
     }
 
-    val hero = remember(resume, latest) { (resume.take(4) + latest).distinctBy { it.id }.take(12) }
+    // Todo se pide a la vez: la portada va apareciendo según llegan los datos, sin esperas en cadena.
+    LaunchedEffect(Unit) {
+        var authFailed = false
+        coroutineScope {
+            launch {
+                try {
+                    views = client.views().filter {
+                        if (isSeries) it.collectionType == "tvshows"
+                        else it.collectionType != "tvshows" && it.collectionType != "livetv" && it.collectionType != "music"
+                    }
+                } catch (e: Exception) {
+                    if (e.message?.contains("401") == true) authFailed = true
+                    error = friendlyError(e)
+                }
+                loading = false
+            }
+            launch {
+                try {
+                    resume = client.resume().filter { inMode(it) }
+                } catch (e: Exception) {
+                    // sin "continuar viendo"
+                }
+                resumeDone = true
+            }
+            launch {
+                try {
+                    latest = client.latest(typesForMode)
+                } catch (e: Exception) {
+                    // sin novedades
+                }
+                latestDone = true
+            }
+            launch {
+                favs = try {
+                    client.favorites().filter { inMode(it) }
+                } catch (e: Exception) {
+                    emptyList()
+                }
+            }
+        }
+        loading = false
+        if (authFailed) onAuthError()
+    }
+
+    // La cartelera se monta una sola vez, cuando ya están los dos datos (evita saltos y fallos del carrusel).
+    val hero = remember(resume, latest, resumeDone, latestDone) {
+        if (resumeDone && latestDone) (resume.take(4) + latest).distinctBy { it.id }.take(12) else emptyList()
+    }
 
     LazyColumn(Modifier.fillMaxSize().background(Bg), contentPadding = PaddingValues(bottom = 40.dp)) {
         item {
@@ -146,11 +192,11 @@ fun HomeScreen(
         // ¿Qué te apetece?: elige según el momento en lugar de filas repetidas.
         item { Section("¿Qué te apetece?", pad) {} }
         item {
-            MoodGrid(pad) { m ->
+            MoodGrid(pad, moodList) { m ->
                 when (m.kind) {
                     "random" -> scope.launch {
                         try {
-                            client.random()?.let { onOpen(it) }
+                            client.random(typesForMode)?.let { onOpen(it) }
                         } catch (e: Exception) {
                             error = friendlyError(e)
                         }
@@ -230,7 +276,7 @@ private fun Cartelera(
     val state = rememberPagerState(pageCount = { items.size })
     val cur = items[state.currentPage.coerceIn(0, items.lastIndex)]
     val ambient = rememberAmbient(client.poster(cur, 300))
-    val pageW = if (isTv) 210.dp else 190.dp
+    val pageW = if (isTv) 250.dp else 190.dp
     val pageH = pageW * 1.5f
     val shape = RoundedCornerShape(14.dp)
     var focused by remember { mutableStateOf(false) }
@@ -329,18 +375,47 @@ private fun Cartelera(
                 cur.rating?.let { "★ %.1f".format(it) },
             ).joinToString("   ·   ")
             if (meta.isNotEmpty()) Text(meta, color = TextMuted, fontSize = 13.sp)
+            if (isTv && cur.overview.isNotBlank()) {
+                Text(
+                    cur.overview, fontSize = 14.sp, color = Color(0xFFE6E6F0), maxLines = 3,
+                    overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                    modifier = Modifier.widthIn(max = 720.dp),
+                )
+            }
             val playable = cur.type == "Movie" || cur.type == "Episode" || cur.type == "Video"
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (playable) {
                     val resumable = cur.resumeMs > 30_000
-                    Button(onClick = { onPlay(cur, if (resumable) cur.resumeMs else 0L) }) {
-                        Text(if (resumable) "Reanudar" else "▶  Reproducir", fontWeight = FontWeight.Bold)
-                    }
-                    OutlinedButton(onClick = { onOpen(cur) }) { Text("Ficha") }
+                    HeroButton(if (resumable) "Reanudar" else "▶  Reproducir", true) { onPlay(cur, if (resumable) cur.resumeMs else 0L) }
+                    HeroButton("Ficha", false) { onOpen(cur) }
                 } else {
-                    Button(onClick = { onOpen(cur) }) { Text("Ver ficha", fontWeight = FontWeight.Bold) }
+                    HeroButton("Ver ficha", true) { onOpen(cur) }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.padding(top = 4.dp)) {
+                items.forEachIndexed { i, _ ->
+                    Box(
+                        Modifier.size(if (i == state.currentPage) 8.dp else 6.dp).clip(CircleShape)
+                            .background(if (i == state.currentPage) Amber else Color(0x55FFFFFF))
+                    )
                 }
             }
         }
+    }
+}
+
+/** Botón de la cartelera con foco bien visible para el mando de la TV. */
+@Composable
+private fun HeroButton(text: String, primary: Boolean, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(24.dp)
+    val mod = Modifier
+        .scale(if (focused) 1.08f else 1f)
+        .onFocusChanged { focused = it.isFocused }
+        .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
+    if (primary) {
+        Button(onClick = onClick, modifier = mod) { Text(text, fontWeight = FontWeight.Bold) }
+    } else {
+        OutlinedButton(onClick = onClick, modifier = mod) { Text(text) }
     }
 }

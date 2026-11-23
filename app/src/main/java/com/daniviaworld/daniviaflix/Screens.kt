@@ -86,7 +86,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 sealed interface Screen {
-    data object Home : Screen
+    data object Hub : Screen
+    data class Home(val mode: String) : Screen
+    data object Accounts : Screen
+    data object Tv : Screen
     data class Library(val view: Item) : Screen
     data object Settings : Screen
     data object Search : Screen
@@ -235,7 +238,7 @@ internal fun Section(title: String, pad: Dp, content: @Composable () -> Unit) {
 // ---------------------------------------------------------------- Login
 
 @Composable
-fun LoginScreen(client: EmbyClient, initialServer: String, onLoggedIn: (Session) -> Unit) {
+fun LoginScreen(client: EmbyClient, initialServer: String, onCancel: (() -> Unit)? = null, onLoggedIn: (Session) -> Unit) {
     val scope = rememberCoroutineScope()
     var server by remember { mutableStateOf(initialServer) }
     var user by remember { mutableStateOf("") }
@@ -293,6 +296,7 @@ fun LoginScreen(client: EmbyClient, initialServer: String, onLoggedIn: (Session)
                 enabled = !busy && server.isNotBlank() && user.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) { Text(if (busy) "Conectando…" else "Entrar", fontWeight = FontWeight.Bold) }
+            if (onCancel != null) TextButton(onClick = onCancel) { Text("Cancelar", color = TextMuted) }
         }
     }
 }

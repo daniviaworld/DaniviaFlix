@@ -43,6 +43,28 @@ data class Item(
     val favorite: Boolean = false,
 )
 
+data class Program(val name: String, val startMs: Long, val endMs: Long, val overview: String)
+
+data class Channel(val id: String, val name: String, val number: String, val logoTag: String?, val now: Program?)
+
+/** "2026-11-23T20:00:00.0000000Z" → milisegundos (UTC). */
+internal fun parseIso(s: String?): Long {
+    if (s.isNullOrEmpty() || s.length < 19) return 0L
+    return try {
+        val f = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+        f.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        f.parse(s.substring(0, 19))?.time ?: 0L
+    } catch (ex: Exception) {
+        0L
+    }
+}
+
+internal fun Channel.asItem() = Item(
+    id = id, name = name, type = "TvChannel", overview = "", year = null, rating = null, runtimeMin = null,
+    collectionType = null, seriesId = null, seriesName = null, seasonNo = null, episodeNo = null,
+    resumeMs = 0L, primaryTag = logoTag, backdropTag = null, played = false,
+)
+
 data class SubInfo(val url: String, val mime: String, val lang: String?, val label: String)
 
 data class PlayPlan(
@@ -53,10 +75,15 @@ data class PlayPlan(
     val startMs: Long,
     val subs: List<SubInfo>,
     val info: String = "",
+    val liveStreamId: String? = null,
 )
 
 private fun JSONObject.str(key: String): String? =
     if (has(key) && !isNull(key)) optString(key).ifEmpty { null } else null
+
+private fun JSONObject.toProgram() = Program(
+    optString("Name"), parseIso(optString("StartDate")), parseIso(optString("EndDate")), optString("Overview"),
+)
 
 private fun JSONObject.intOrNull(key: String): Int? =
     if (has(key) && !isNull(key)) optInt(key) else null
@@ -215,13 +242,13 @@ class EmbyClient(ctx: Context) {
         call("GET", u("/Users/${uid()}/Items/Resume", "Limit" to "16", "MediaTypes" to "Video", "Fields" to fields))
     )
 
-    suspend fun latest(): List<Item> = parseItems(
+    suspend fun latest(types: String = "Movie,Series"): List<Item> = parseItems(
         call(
             "GET",
             u(
                 "/Users/${uid()}/Items",
                 "SortBy" to "DateCreated", "SortOrder" to "Descending", "Recursive" to "true",
-                "IncludeItemTypes" to "Movie,Series", "Limit" to "24", "Fields" to fields,
+                "IncludeItemTypes" to types, "Limit" to "24", "Fields" to fields,
             )
         )
     )
@@ -256,12 +283,12 @@ class EmbyClient(ctx: Context) {
         call("GET", u("/Shows/$seriesId/Episodes", "UserId" to uid(), "SeasonId" to seasonId, "Fields" to fields))
     )
 
-    suspend fun random(): Item? = parseItems(
+    suspend fun random(types: String = "Movie"): Item? = parseItems(
         call(
             "GET",
             u(
                 "/Users/${uid()}/Items",
-                "SortBy" to "Random", "Recursive" to "true", "IncludeItemTypes" to "Movie", "Limit" to "1", "Fields" to fields,
+                "SortBy" to "Random", "Recursive" to "true", "IncludeItemTypes" to types, "Limit" to "1", "Fields" to fields,
             )
         )
     ).firstOrNull()
@@ -392,6 +419,58 @@ class EmbyClient(ctx: Context) {
             .filter { it.isNotEmpty() }.joinToString(" · ")
     }
 
+    // ---------- TV en directo (Live TV de Emby) ----------
+
+    /** Número total de canales de esta cuenta y los primeros (para la pantalla de inicio). 0 = sin TV. */
+    suspend fun channelPreview(): Pair<Int, List<Channel>> = try {
+        val j = JSONObject(call("GET", u("/LiveTv/Channels", "UserId" to uid(), "Limit" to "6")))
+        val arr = j.optJSONArray("Items")
+        val list = if (arr == null) emptyList() else (0 until arr.length()).map { toChannel(arr.getJSONObject(it)) }
+        j.optInt("TotalRecordCount") to list
+    } catch (e: Exception) {
+        0 to emptyList()
+    }
+
+    private fun toChannel(o: JSONObject) = Channel(
+        o.optString("Id"), o.optString("Name"), o.optString("Number"),
+        o.optJSONObject("ImageTags")?.str("Primary"), o.optJSONObject("CurrentProgram")?.toProgram(),
+    )
+
+    suspend fun channels(): List<Channel> {
+        val j = JSONObject(
+            call("GET", u("/LiveTv/Channels", "UserId" to uid(), "AddCurrentProgram" to "true", "Limit" to "3000"))
+        )
+        val arr = j.optJSONArray("Items") ?: return emptyList()
+        return (0 until arr.length()).map { toChannel(arr.getJSONObject(it)) }
+            .distinctBy { it.id }
+            .sortedWith(compareBy({ it.number.toDoubleOrNull() ?: Double.MAX_VALUE }, { it.name.lowercase() }))
+    }
+
+    /** Programación de las próximas horas de un canal. */
+    suspend fun programs(channelId: String): List<Program> {
+        val iso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+        iso.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        val now = System.currentTimeMillis()
+        val txt = call(
+            "GET",
+            u(
+                "/LiveTv/Programs",
+                "UserId" to uid(), "ChannelIds" to channelId,
+                "MinEndDate" to iso.format(java.util.Date(now)),
+                "MaxStartDate" to iso.format(java.util.Date(now + 8 * 3_600_000L)),
+                "SortBy" to "StartDate", "Fields" to "Overview",
+            )
+        )
+        val arr = JSONObject(txt).optJSONArray("Items") ?: return emptyList()
+        return (0 until arr.length()).map { arr.getJSONObject(it).toProgram() }
+    }
+
+    fun logo(ch: Channel, maxHeight: Int = 160): String? {
+        val s = session ?: return null
+        val tag = ch.logoTag ?: return null
+        return "${s.server}/emby/Items/${ch.id}/Images/Primary?maxHeight=$maxHeight&quality=90&tag=$tag&api_key=${s.token}"
+    }
+
     // ---------- Reproducción ----------
 
     private fun cond(prop: String, value: Int) = JSONObject()
@@ -466,7 +545,7 @@ class EmbyClient(ctx: Context) {
     }
 
     /** maxMbps = 0: automática (la mejor calidad posible). Si no, tope en Mbps elegido por el usuario. */
-    suspend fun planPlayback(item: Item, startMs: Long, forceTranscode: Boolean, maxMbps: Int = 0): PlayPlan {
+    suspend fun planPlayback(item: Item, startMs: Long, forceTranscode: Boolean, maxMbps: Int = 0, live: Boolean = false): PlayPlan {
         val s = session ?: throw IOException("Sin sesión")
         val maxBps = if (maxMbps > 0) maxMbps * 1_000_000 else 200_000_000
         val q = u(
@@ -497,7 +576,7 @@ class EmbyClient(ctx: Context) {
         val method: String
         val url: String
         when {
-            ms.optBoolean("SupportsDirectPlay") && !forceTranscode -> {
+            ms.optBoolean("SupportsDirectPlay") && !forceTranscode && !live -> {
                 method = "DirectPlay"
                 val c = ms.optString("Container", "mkv").substringBefore(',').ifEmpty { "mkv" }
                 url = "${s.server}/emby/Videos/${item.id}/stream.$c?Static=true&MediaSourceId=$msId" +
@@ -543,7 +622,7 @@ class EmbyClient(ctx: Context) {
                 }
             }
         }
-        return PlayPlan(url, method, psid, msId, startMs, subs, info)
+        return PlayPlan(url, method, psid, msId, startMs, subs, info, ms.optString("LiveStreamId").ifEmpty { null })
     }
 
     /** kind: "start" | "progress" | "stop" — así Emby recuerda por dónde vas ("Continuar viendo"). */
@@ -560,6 +639,7 @@ class EmbyClient(ctx: Context) {
             .put("PositionTicks", posMs * 10_000)
             .put("IsPaused", paused)
             .put("PlayMethod", plan.method)
+        plan.liveStreamId?.let { b.put("LiveStreamId", it) }
         try {
             call("POST", u(path), b)
         } catch (e: Exception) {
