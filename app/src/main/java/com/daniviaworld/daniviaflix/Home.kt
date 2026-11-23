@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
@@ -67,6 +68,7 @@ fun HomeScreen(
     client: EmbyClient,
     onOpen: (Item) -> Unit,
     onPlay: (Item, Long) -> Unit,
+    onGroup: (Screen.Group) -> Unit,
     onLogout: () -> Unit,
 ) {
     val isTv = rememberIsTv()
@@ -131,6 +133,22 @@ fun HomeScreen(
         // Cartelera: carrusel curvo con el color del póster de fondo.
         if (hero.isNotEmpty()) item { Cartelera(client, hero, isTv, onOpen, onPlay) }
 
+        // ¿Qué te apetece?: elige según el momento en lugar de filas repetidas.
+        item { Section("¿Qué te apetece?", pad) {} }
+        item { MoodGrid(pad) { m -> onGroup(Screen.Group(m.label, null, "mood", m.kind)) } }
+
+        // Tus bibliotecas como pilas de carátulas, en el orden de Emby.
+        if (views.isNotEmpty()) {
+            item { Section("Mis bibliotecas", pad) {} }
+            item {
+                LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    itemsIndexed(views, key = { _, v -> v.id }) { idx, v ->
+                        LibraryStack(client, v, idx, if (isTv) 300.dp else 210.dp, if (isTv) 220.dp else 170.dp) { onOpen(v) }
+                    }
+                }
+            }
+        }
+
         if (resume.isNotEmpty()) item {
             Section("Continuar viendo", pad) {
                 LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -140,20 +158,6 @@ fun HomeScreen(
                 }
             }
         }
-
-        // Todas las bibliotecas / carpetas a la vista, en el orden de Emby.
-        if (views.isNotEmpty()) {
-            item { Section("Mis bibliotecas", pad) {} }
-            items(views.chunked(cols)) { row ->
-                Row(Modifier.padding(horizontal = pad, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    row.forEach { v -> LibraryTile(client, v, Modifier.weight(1f)) { onOpen(v) } }
-                    repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
-                }
-            }
-        }
-
-        // Una fila por biblioteca con lo último añadido, como en Emby.
-        items(views, key = { "lib-" + it.id }) { v -> LibraryRow(client, v, pad, posterW, onOpen) }
 
         item {
             Row(Modifier.padding(horizontal = pad - 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -172,26 +176,6 @@ fun HomeScreen(
     }
 
     update?.let { u -> UpdateDialog(u) { update = null } }
-}
-
-@Composable
-private fun LibraryRow(client: EmbyClient, view: Item, pad: androidx.compose.ui.unit.Dp, posterW: androidx.compose.ui.unit.Dp, onOpen: (Item) -> Unit) {
-    var list by remember(view.id) { mutableStateOf<List<Item>?>(null) }
-    LaunchedEffect(view.id) {
-        list = try {
-            client.latestIn(view)
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-    val l = list
-    if (l != null && l.isNotEmpty()) {
-        Section("Últimos en ${view.name}", pad) {
-            LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(l, key = { it.id }) { i -> PosterCard(client, i, Modifier.width(posterW)) { onOpen(i) } }
-            }
-        }
-    }
 }
 
 /** Galería "Cartelera": pósters en arco 3D. El de en medio crece y el fondo se tiñe con su color. */

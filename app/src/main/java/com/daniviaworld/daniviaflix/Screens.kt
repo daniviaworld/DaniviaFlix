@@ -85,6 +85,7 @@ import kotlinx.coroutines.withContext
 sealed interface Screen {
     data object Home : Screen
     data class Library(val view: Item) : Screen
+    data class Group(val title: String, val view: Item?, val kind: String, val arg: String) : Screen
     data class Detail(val item: Item) : Screen
     data class Player(val item: Item, val startMs: Long) : Screen
 }
@@ -98,7 +99,7 @@ fun rememberIsTv(): Boolean {
     }
 }
 
-private fun Modifier.focusRing(focused: Boolean, shape: Shape): Modifier =
+internal fun Modifier.focusRing(focused: Boolean, shape: Shape): Modifier =
     if (focused) this.border(3.dp, Amber, shape) else this
 
 private fun fmt(ms: Long): String {
@@ -206,7 +207,7 @@ fun LibraryTile(client: EmbyClient, view: Item, modifier: Modifier, onClick: () 
 }
 
 @Composable
-private fun TopBar(title: String, onBack: () -> Unit) {
+internal fun TopBar(title: String, onBack: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
@@ -287,61 +288,6 @@ fun LoginScreen(client: EmbyClient, initialServer: String, onLoggedIn: (Session)
                 enabled = !busy && server.isNotBlank() && user.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) { Text(if (busy) "Conectando…" else "Entrar", fontWeight = FontWeight.Bold) }
-        }
-    }
-}
-
-// ---------------------------------------------------------------- Biblioteca
-
-private data class SortOpt(val label: String, val by: String, val order: String)
-
-private val sortOptions = listOf(
-    SortOpt("Nombre", "SortName", "Ascending"),
-    SortOpt("Añadido", "DateCreated,SortName", "Descending"),
-    SortOpt("Año", "ProductionYear,SortName", "Descending"),
-    SortOpt("Valoración", "CommunityRating,SortName", "Descending"),
-)
-
-@Composable
-fun LibraryScreen(client: EmbyClient, view: Item, onBack: () -> Unit, onOpen: (Item) -> Unit) {
-    val isTv = rememberIsTv()
-    var sortIdx by remember { mutableStateOf(0) }
-    var list by remember { mutableStateOf<List<Item>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(view.id, sortIdx) {
-        loading = true
-        error = null
-        try {
-            val s = sortOptions[sortIdx]
-            list = client.library(view, s.by, s.order)
-        } catch (e: Exception) {
-            error = friendlyError(e)
-        }
-        loading = false
-    }
-
-    Column(Modifier.fillMaxSize().background(Bg)) {
-        TopBar(view.name, onBack)
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(sortOptions.size) { idx ->
-                FilterChip(selected = idx == sortIdx, onClick = { sortIdx = idx }, label = { Text(sortOptions[idx].label) })
-            }
-        }
-        val err = error
-        if (err != null) Text(err, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(16.dp))
-        if (loading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Amber) }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(if (isTv) 160.dp else 112.dp),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                items(list, key = { it.id }) { i -> PosterCard(client, i, Modifier.fillMaxWidth()) { onOpen(i) } }
-            }
         }
     }
 }

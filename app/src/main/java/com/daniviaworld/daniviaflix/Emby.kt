@@ -288,6 +288,62 @@ class EmbyClient(ctx: Context) {
         return (0 until arr.length()).map { arr.getJSONObject(it).toItem() }
     }
 
+    // ---------- Categorías y "momentos" ----------
+
+    private fun typesFor(view: Item?) = when (view?.collectionType) {
+        "movies" -> "Movie"
+        "tvshows" -> "Series"
+        "boxsets" -> "BoxSet"
+        else -> null
+    }
+
+    /** Categorías (géneros) que existen dentro de una biblioteca, tal como las tienes en Emby. */
+    suspend fun genres(view: Item): List<String> {
+        val q = mutableListOf("ParentId" to view.id, "UserId" to uid(), "SortBy" to "SortName", "Recursive" to "true")
+        typesFor(view)?.let { q += "IncludeItemTypes" to it }
+        val arr = JSONObject(call("GET", u("/Genres", *q.toTypedArray()))).optJSONArray("Items") ?: return emptyList()
+        return (0 until arr.length()).map { arr.getJSONObject(it).optString("Name") }.filter { it.isNotBlank() }
+    }
+
+    suspend fun byGenre(view: Item, genre: String, limit: Int, sortBy: String = "SortName", order: String = "Ascending"): List<Item> {
+        val q = mutableListOf(
+            "ParentId" to view.id, "Genres" to genre, "Recursive" to "true", "SortBy" to sortBy,
+            "SortOrder" to order, "Limit" to limit.toString(), "Fields" to fields,
+        )
+        typesFor(view)?.let { q += "IncludeItemTypes" to it }
+        return parseItems(call("GET", u("/Users/${uid()}/Items", *q.toTypedArray())))
+    }
+
+    /** Cuántos títulos hay en una biblioteca. */
+    suspend fun countIn(view: Item): Int {
+        val q = mutableListOf("ParentId" to view.id, "Recursive" to "true", "Limit" to "1")
+        typesFor(view)?.let { q += "IncludeItemTypes" to it }
+        return JSONObject(call("GET", u("/Users/${uid()}/Items", *q.toTypedArray()))).optInt("TotalRecordCount")
+    }
+
+    /** Tres carátulas al azar de una biblioteca, para su tarjeta en abanico. */
+    suspend fun sample(view: Item): List<Item> {
+        val q = mutableListOf(
+            "ParentId" to view.id, "Recursive" to "true", "SortBy" to "Random", "Limit" to "10", "Fields" to fields,
+        )
+        typesFor(view)?.let { q += "IncludeItemTypes" to it }
+            ?: run { q += "IncludeItemTypes" to "Movie,Series,BoxSet" }
+        return parseItems(call("GET", u("/Users/${uid()}/Items", *q.toTypedArray()))).filter { it.primaryTag != null }.take(3)
+    }
+
+    /** "¿Qué te apetece?": short = pelis cortas, epic = largas y bien valoradas, kids = familia, marathon = series. */
+    suspend fun mood(kind: String): List<Item> {
+        val base = mutableListOf("Recursive" to "true", "Fields" to fields)
+        return when (kind) {
+            "short" -> parseItems(call("GET", u("/Users/${uid()}/Items", *(base + listOf("IncludeItemTypes" to "Movie", "SortBy" to "Random", "Limit" to "300")).toTypedArray())))
+                .filter { (it.runtimeMin ?: 0) in 1..95 }.take(60)
+            "epic" -> parseItems(call("GET", u("/Users/${uid()}/Items", *(base + listOf("IncludeItemTypes" to "Movie", "SortBy" to "CommunityRating", "SortOrder" to "Descending", "Limit" to "300")).toTypedArray())))
+                .filter { (it.runtimeMin ?: 0) >= 120 }.take(60)
+            "kids" -> parseItems(call("GET", u("/Users/${uid()}/Items", *(base + listOf("IncludeItemTypes" to "Movie,Series", "Genres" to "Animación|Animation|Familia|Family|Infantil|Children|Kids|Familiar", "SortBy" to "Random", "Limit" to "80")).toTypedArray())))
+            else -> parseItems(call("GET", u("/Users/${uid()}/Items", *(base + listOf("IncludeItemTypes" to "Series", "SortBy" to "Random", "Limit" to "60")).toTypedArray())))
+        }
+    }
+
     // ---------- Reproducción ----------
 
     private fun cond(prop: String, value: Int) = JSONObject()

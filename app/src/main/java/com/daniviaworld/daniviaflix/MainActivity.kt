@@ -96,6 +96,7 @@ fun App() {
                         client,
                         onOpen = open,
                         onPlay = { i, ms -> stack.add(Screen.Player(i, ms)) },
+                        onGroup = { g -> stack.add(g) },
                         onLogout = {
                             val server = prefs.getString("server", "") ?: ""
                             prefs.edit().clear().putString("server", server).apply()
@@ -105,7 +106,8 @@ fun App() {
                             phase = "login"
                         },
                     )
-                    is Screen.Library -> LibraryScreen(client, current.view, onBack = pop, onOpen = open)
+                    is Screen.Library -> LibraryScreen(client, current.view, onBack = pop, onOpen = open, onGroup = { g -> stack.add(g) })
+                    is Screen.Group -> GroupScreen(client, current, onBack = pop, onOpen = open)
                     is Screen.Detail -> DetailScreen(
                         client, current.item, onBack = pop,
                         onPlay = { i, ms -> stack.add(Screen.Player(i, ms)) },
