@@ -118,7 +118,7 @@ private fun LivePlayer(client: EmbyClient, ch: Channel, modifier: Modifier) {
             plan = if (direct) {
                 PlayPlan(if (useAlt) (ch.alt ?: ch.url!!) else ch.url!!, "DirectPlay", "", "", 0L, emptyList())
             } else {
-                client.planPlayback(ch.asItem(), 0L, force, Prefs.quality(ctx), live = true)
+                client.planPlayback(ch.asItem(), 0L, force, Prefs.quality(ctx), live = !ch.vod)
             }
         } catch (e: Exception) {
             error = friendlyError(e)
@@ -285,10 +285,13 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
             error = friendlyError(e)
             emptyList()
         }
-        val extra = Iptv.loadAll(ctx).let { l ->
-            l.mapIndexed { i, c -> if (c.number.isBlank()) c.copy(number = (emby.size + i + 1).toString()) else c }
+        val lib = try {
+            client.libraryChannels(client.views().filter { isTvView(it) }).second
+        } catch (e: Exception) {
+            emptyList()
         }
-        channels = emby + extra
+        val extra = Iptv.loadAll(ctx)
+        channels = (emby + lib + extra).mapIndexed { i, c -> if (c.number.isBlank()) c.copy(number = (i + 1).toString()) else c }
         val last = Prefs.lastChannel(ctx)
         idx = channels.indexOfFirst { it.id == last }.coerceAtLeast(0)
         if (channels.isEmpty()) diag = try { client.liveDiag() } catch (e: Exception) { null }
@@ -309,7 +312,7 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
     // Programación del canal que se está viendo (o del que estás explorando en la lista).
     LaunchedEffect(shownId) {
         val id = shownId ?: return@LaunchedEffect
-        if (id.startsWith("iptv:")) {
+        if (channels.firstOrNull { it.id == id }?.hasEpg == false) {
             progs = id to emptyList()
             return@LaunchedEffect
         }

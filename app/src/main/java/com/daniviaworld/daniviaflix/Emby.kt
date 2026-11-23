@@ -48,7 +48,16 @@ data class Program(val name: String, val startMs: Long, val endMs: Long, val ove
 data class Channel(
     val id: String, val name: String, val number: String, val logoTag: String?, val now: Program?,
     val url: String? = null, val logoUrl: String? = null, val alt: String? = null,
+    val vod: Boolean = false,
 )
+
+/** Biblioteca de Emby que en realidad son tus canales (p. ej. "TV online"). */
+internal fun isTvView(v: Item): Boolean =
+    v.collectionType == "livetv" ||
+        (v.collectionType != "tvshows" && v.collectionType != "music" &&
+            Regex("(?i)(^|\\W)(tv|iptv|canales|directo|live)(\\W|$)").containsMatchIn(v.name))
+
+internal val Channel.hasEpg: Boolean get() = url == null && !vod
 
 /** "2026-11-23T20:00:00.0000000Z" → milisegundos (UTC). */
 internal fun parseIso(s: String?): Long {
@@ -63,7 +72,7 @@ internal fun parseIso(s: String?): Long {
 }
 
 internal fun Channel.asItem() = Item(
-    id = id, name = name, type = "TvChannel", overview = "", year = null, rating = null, runtimeMin = null,
+    id = id, name = name, type = if (vod) "Movie" else "TvChannel", overview = "", year = null, rating = null, runtimeMin = null,
     collectionType = null, seriesId = null, seriesName = null, seasonNo = null, episodeNo = null,
     resumeMs = 0L, primaryTag = logoTag, backdropTag = null, played = false,
 )
@@ -472,6 +481,34 @@ class EmbyClient(ctx: Context) {
             probe("Items TvChannel", "/Users/${uid()}/Items", "IncludeItemTypes" to "TvChannel", "Recursive" to "true", "Limit" to "5"),
             probe("LiveTv/Info", "/LiveTv/Info"),
         ).joinToString("\n")
+    }
+
+    /** Canales que están guardados como elementos dentro de una biblioteca normal de Emby. */
+    suspend fun libraryChannels(views: List<Item>, limit: Int = 5000): Pair<Int, List<Channel>> {
+        var total = 0
+        val out = ArrayList<Channel>()
+        for (v in views) {
+            try {
+                val j = JSONObject(
+                    call(
+                        "GET",
+                        u(
+                            "/Users/${uid()}/Items", "ParentId" to v.id, "Recursive" to "true", "IsFolder" to "false",
+                            "SortBy" to "SortName", "SortOrder" to "Ascending", "Limit" to limit.toString(), "Fields" to "ImageTags",
+                        )
+                    )
+                )
+                total += j.optInt("TotalRecordCount", 0)
+                val arr = j.optJSONArray("Items") ?: continue
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    out.add(Channel(o.optString("Id"), o.optString("Name"), "", o.optJSONObject("ImageTags")?.str("Primary"), null, vod = true))
+                }
+            } catch (ex: Exception) {
+                // esa biblioteca no se pudo leer
+            }
+        }
+        return total to out.distinctBy { it.id }
     }
 
     suspend fun channels(): List<Channel> {

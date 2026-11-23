@@ -93,7 +93,7 @@ private data class HubItem(
 private fun HubCard(item: HubItem, isTv: Boolean, modifier: Modifier) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(26.dp)
-    val pw = if (isTv) 78.dp else 62.dp
+    val pw = if (isTv) 62.dp else 62.dp
     val ph = if (item.logos) pw * 0.7f else pw * 1.5f
     val step = pw * 0.5f
     Box(
@@ -141,7 +141,7 @@ private fun HubCard(item: HubItem, isTv: Boolean, modifier: Modifier) {
             contentAlignment = Alignment.Center,
         ) { Icon(item.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
         Column(Modifier.align(Alignment.BottomStart).padding(18.dp)) {
-            Text(item.title, fontSize = if (isTv) 26.sp else 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            Text(item.title, fontSize = if (isTv) 22.sp else 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
             if (item.sub.isNotEmpty()) Text(item.sub, fontSize = 13.sp, color = Color(0xE6FFFFFF))
         }
     }
@@ -187,6 +187,7 @@ fun HubScreen(
     val pad = if (isTv) 56.dp else 20.dp
     var views by remember { mutableStateOf<List<Item>?>(null) }
     var tvInfo by remember { mutableStateOf<Pair<Int, List<Channel>>?>(null) }
+    var tvLib by remember { mutableStateOf<Pair<Int, List<Channel>>?>(null) }
     var moviePosters by remember { mutableStateOf<List<String>>(emptyList()) }
     var seriesPosters by remember { mutableStateOf<List<String>>(emptyList()) }
     var movieCount by remember { mutableStateOf<Int?>(null) }
@@ -203,7 +204,9 @@ fun HubScreen(
                 try {
                     val v = client.views()
                     views = v
-                    val mv = v.filter { it.collectionType == "movies" }
+                    val tvv = v.filter { isTvView(it) }
+                    if (tvv.isNotEmpty()) launch { tvLib = client.libraryChannels(tvv, 6) }
+                    val mv = v.filter { it.collectionType == "movies" && !isTvView(it) }
                     val sv = v.filter { it.collectionType == "tvshows" }
                     launch {
                         try {
@@ -233,11 +236,12 @@ fun HubScreen(
     val v = views
     val tv = tvInfo
     val ready = v != null && tv != null
-    val hasMovies = v?.any { it.collectionType == "movies" } == true
+    val hasMovies = v?.any { it.collectionType == "movies" && !isTvView(it) } == true
     val hasSeries = v?.any { it.collectionType == "tvshows" } == true
     // TV aparece si la cuenta tiene canales o si en Emby existe la biblioteca de TV en directo.
     val hasTv = true // TV siempre disponible: canales de Emby o listas M3U / Xtream añadidas a mano
     val iptvCount = Iptv.list(ctx).size
+    val tvCount = (tv?.first ?: 0) + (tvLib?.first ?: 0)
     val none = !hasMovies && !hasSeries
 
     val items = buildList {
@@ -260,8 +264,8 @@ fun HubScreen(
         if (ready && hasTv) {
             add(
                 HubItem(
-                    "TV", if ((tv?.first ?: 0) > 0) "${tv?.first} canales en directo" else if (iptvCount > 0) "Tus listas de canales" else "Añade tus canales", IconTv,
-                    Color(0xFF0F766E), Color(0xFF22D3EE), tv?.second.orEmpty().mapNotNull { client.logo(it, 120) }, true, onTv,
+                    "TV", if (tvCount > 0) "$tvCount canales en directo" else if (iptvCount > 0) "Tus listas de canales" else "Añade tus canales", IconTv,
+                    Color(0xFF0F766E), Color(0xFF22D3EE), (tv?.second.orEmpty() + tvLib?.second.orEmpty()).mapNotNull { client.logo(it, 120) }, true, onTv,
                 )
             )
         }
@@ -282,11 +286,11 @@ fun HubScreen(
         Text(
             "DANIVIA\nFLIX",
             modifier = Modifier.align(Alignment.Center),
-            fontSize = if (isTv) 120.sp else 84.sp,
-            lineHeight = if (isTv) 114.sp else 80.sp,
+            fontSize = if (isTv) 150.sp else 84.sp,
+            lineHeight = if (isTv) 140.sp else 80.sp,
             fontWeight = FontWeight.ExtraBold,
             textAlign = TextAlign.Center,
-            color = Color.White.copy(alpha = 0.05f),
+            color = Color.White.copy(alpha = 0.13f),
         )
 
         Column(Modifier.fillMaxSize().padding(horizontal = pad, vertical = 18.dp)) {
@@ -304,9 +308,9 @@ fun HubScreen(
             } else if (isTv) {
                 Spacer(Modifier.weight(1f))
                 Row(
-                    Modifier.fillMaxWidth().height(250.dp),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
-                ) { items.forEach { HubCard(it, true, Modifier.width(270.dp).fillMaxHeight()) } }
+                    Modifier.fillMaxWidth().height(200.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally),
+                ) { items.forEach { HubCard(it, true, Modifier.width(220.dp).fillMaxHeight()) } }
                 Spacer(Modifier.weight(1f))
             } else {
                 Column(

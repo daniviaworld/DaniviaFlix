@@ -118,7 +118,7 @@ fun HomeScreen(
                 try {
                     views = client.views().filter {
                         if (isSeries) it.collectionType == "tvshows"
-                        else it.collectionType != "tvshows" && it.collectionType != "livetv" && it.collectionType != "music"
+                        else it.collectionType != "tvshows" && it.collectionType != "livetv" && it.collectionType != "music" && !isTvView(it)
                     }
                 } catch (e: Exception) {
                     if (e.message?.contains("401") == true) authFailed = true
