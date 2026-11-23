@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
             try {
                 getSharedPreferences("danivia", Context.MODE_PRIVATE).edit()
                     .putString("lastCrash", android.util.Log.getStackTraceString(e).take(2500)).commit()
-            } catch (_: Throwable) {
+            } catch (ignored: Throwable) {
             }
             previous?.uncaughtException(t, e)
         }
