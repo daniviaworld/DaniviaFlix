@@ -422,25 +422,43 @@ class EmbyClient(ctx: Context) {
     // ---------- TV en directo (Live TV de Emby) ----------
 
     /** Número total de canales de esta cuenta y los primeros (para la pantalla de inicio). 0 = sin TV. */
-    suspend fun channelPreview(): Pair<Int, List<Channel>> = try {
-        val j = JSONObject(call("GET", u("/LiveTv/Channels", "UserId" to uid(), "Limit" to "6")))
-        val arr = j.optJSONArray("Items")
-        val list = if (arr == null) emptyList() else (0 until arr.length()).map { toChannel(arr.getJSONObject(it)) }
-        j.optInt("TotalRecordCount") to list
-    } catch (e: Exception) {
-        0 to emptyList()
+    suspend fun channelPreview(): Pair<Int, List<Channel>> {
+        fun parse(txt: String): Pair<Int, List<Channel>> {
+            val j = JSONObject(txt)
+            val arr = j.optJSONArray("Items")
+            val list = if (arr == null) emptyList() else (0 until arr.length()).map { toChannel(arr.getJSONObject(it)) }
+            return j.optInt("TotalRecordCount", list.size) to list
+        }
+        try {
+            val r = parse(call("GET", u("/LiveTv/Channels", "UserId" to uid(), "Limit" to "6")))
+            if (r.first > 0) return r
+        } catch (e: Exception) {
+            // se prueba la vía alternativa
+        }
+        return try {
+            parse(call("GET", u("/Users/${uid()}/Items", "IncludeItemTypes" to "TvChannel", "Recursive" to "true", "Limit" to "6")))
+        } catch (e: Exception) {
+            0 to emptyList()
+        }
     }
 
     private fun toChannel(o: JSONObject) = Channel(
-        o.optString("Id"), o.optString("Name"), o.optString("Number"),
+        o.optString("Id"), o.optString("Name"),
+        o.optString("Number").ifEmpty { o.optString("ChannelNumber") },
         o.optJSONObject("ImageTags")?.str("Primary"), o.optJSONObject("CurrentProgram")?.toProgram(),
     )
 
     suspend fun channels(): List<Channel> {
-        val j = JSONObject(
-            call("GET", u("/LiveTv/Channels", "UserId" to uid(), "AddCurrentProgram" to "true", "Limit" to "3000"))
-        )
-        val arr = j.optJSONArray("Items") ?: return emptyList()
+        var arr = try {
+            JSONObject(call("GET", u("/LiveTv/Channels", "UserId" to uid(), "AddCurrentProgram" to "true", "Limit" to "3000"))).optJSONArray("Items")
+        } catch (e: Exception) {
+            null
+        }
+        if (arr == null || arr.length() == 0) {
+            arr = JSONObject(
+                call("GET", u("/Users/${uid()}/Items", "IncludeItemTypes" to "TvChannel", "Recursive" to "true", "Limit" to "3000"))
+            ).optJSONArray("Items") ?: return emptyList()
+        }
         return (0 until arr.length()).map { toChannel(arr.getJSONObject(it)) }
             .distinctBy { it.id }
             .sortedWith(compareBy({ it.number.toDoubleOrNull() ?: Double.MAX_VALUE }, { it.name.lowercase() }))

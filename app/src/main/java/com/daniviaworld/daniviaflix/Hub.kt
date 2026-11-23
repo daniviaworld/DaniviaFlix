@@ -93,7 +93,7 @@ private data class HubItem(
 private fun HubCard(item: HubItem, isTv: Boolean, modifier: Modifier) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(26.dp)
-    val pw = if (isTv) 110.dp else 62.dp
+    val pw = if (isTv) 78.dp else 62.dp
     val ph = if (item.logos) pw * 0.7f else pw * 1.5f
     val step = pw * 0.5f
     Box(
@@ -136,13 +136,13 @@ private fun HubCard(item: HubItem, isTv: Boolean, modifier: Modifier) {
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000))))
         )
         Box(
-            Modifier.align(Alignment.TopStart).padding(16.dp).size(if (isTv) 52.dp else 44.dp)
+            Modifier.align(Alignment.TopStart).padding(16.dp).size(44.dp)
                 .clip(CircleShape).background(Color(0x33000000)),
             contentAlignment = Alignment.Center,
-        ) { Icon(item.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(if (isTv) 28.dp else 24.dp)) }
+        ) { Icon(item.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)) }
         Column(Modifier.align(Alignment.BottomStart).padding(18.dp)) {
-            Text(item.title, fontSize = if (isTv) 34.sp else 26.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-            if (item.sub.isNotEmpty()) Text(item.sub, fontSize = if (isTv) 15.sp else 13.sp, color = Color(0xE6FFFFFF))
+            Text(item.title, fontSize = if (isTv) 26.sp else 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            if (item.sub.isNotEmpty()) Text(item.sub, fontSize = 13.sp, color = Color(0xE6FFFFFF))
         }
     }
 }
@@ -235,7 +235,8 @@ fun HubScreen(
     val ready = v != null && tv != null
     val hasMovies = v?.any { it.collectionType == "movies" } == true
     val hasSeries = v?.any { it.collectionType == "tvshows" } == true
-    val hasTv = (tv?.first ?: 0) > 0
+    // TV aparece si la cuenta tiene canales o si en Emby existe la biblioteca de TV en directo.
+    val hasTv = (tv?.first ?: 0) > 0 || v?.any { it.collectionType == "livetv" } == true
     val none = !hasMovies && !hasSeries && !hasTv
 
     val items = buildList {
@@ -258,7 +259,7 @@ fun HubScreen(
         if (ready && hasTv) {
             add(
                 HubItem(
-                    "TV", "${tv?.first ?: 0} canales en directo", IconTv,
+                    "TV", if ((tv?.first ?: 0) > 0) "${tv?.first} canales en directo" else "Canales en directo", IconTv,
                     Color(0xFF0F766E), Color(0xFF22D3EE), tv?.second.orEmpty().mapNotNull { client.logo(it, 120) }, true, onTv,
                 )
             )
@@ -280,8 +281,8 @@ fun HubScreen(
         Text(
             "DANIVIA\nFLIX",
             modifier = Modifier.align(Alignment.Center),
-            fontSize = if (isTv) 170.sp else 84.sp,
-            lineHeight = if (isTv) 160.sp else 80.sp,
+            fontSize = if (isTv) 120.sp else 84.sp,
+            lineHeight = if (isTv) 114.sp else 80.sp,
             fontWeight = FontWeight.ExtraBold,
             textAlign = TextAlign.Center,
             color = Color.White.copy(alpha = 0.05f),
@@ -302,9 +303,9 @@ fun HubScreen(
             } else if (isTv) {
                 Spacer(Modifier.weight(1f))
                 Row(
-                    Modifier.fillMaxWidth().height(380.dp),
-                    horizontalArrangement = Arrangement.spacedBy(28.dp),
-                ) { items.forEach { HubCard(it, true, Modifier.weight(1f).fillMaxHeight()) } }
+                    Modifier.fillMaxWidth().height(250.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
+                ) { items.forEach { HubCard(it, true, Modifier.width(270.dp).fillMaxHeight()) } }
                 Spacer(Modifier.weight(1f))
             } else {
                 Column(
@@ -314,8 +315,8 @@ fun HubScreen(
             }
 
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.Center) {
-                Text("By ", color = TextMuted, fontSize = if (isTv) 16.sp else 13.sp)
-                Text("DaniviaTV", color = Amber, fontWeight = FontWeight.Bold, fontSize = if (isTv) 16.sp else 13.sp)
+                Text("By ", color = TextMuted, fontSize = 13.sp)
+                Text("DaniviaTV", color = Amber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
     }
