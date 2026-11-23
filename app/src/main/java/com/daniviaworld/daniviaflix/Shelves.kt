@@ -86,7 +86,8 @@ fun LibraryStack(client: EmbyClient, view: Item, index: Int, width: Dp, height: 
     }
     val (c1, c2) = stackColors[index % stackColors.size]
     val shape = RoundedCornerShape(20.dp)
-    val pw = width * 0.31f
+    val pw = height * 0.42f
+    val ownImage = client.image(view, "Primary", 500)
     val unit = when (view.collectionType) {
         "movies" -> "películas"
         "tvshows" -> "series"
@@ -104,14 +105,19 @@ fun LibraryStack(client: EmbyClient, view: Item, index: Int, width: Dp, height: 
             .onFocusChanged { focused = it.hasFocus }
             .clickable(onClick = onClick)
     ) {
-        posters.getOrNull(1)?.let {
-            MiniPoster(client, it, pw, Modifier.align(Alignment.TopStart).offset(x = width * 0.08f, y = height * 0.13f).rotate(-12f))
-        }
-        posters.getOrNull(2)?.let {
-            MiniPoster(client, it, pw, Modifier.align(Alignment.TopStart).offset(x = width * 0.61f, y = height * 0.13f).rotate(12f))
-        }
-        posters.getOrNull(0)?.let {
-            MiniPoster(client, it, pw, Modifier.align(Alignment.TopStart).offset(x = width * 0.345f, y = height * 0.05f))
+        if (ownImage != null) {
+            // Tu propia imagen de la biblioteca (por ejemplo el logo de Amazon): se respeta tal cual.
+            AsyncImage(model = ownImage, contentDescription = view.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else {
+            posters.getOrNull(1)?.let {
+                MiniPoster(client, it, pw, Modifier.align(Alignment.TopStart).offset(x = width * 0.08f, y = height * 0.14f).rotate(-12f))
+            }
+            posters.getOrNull(2)?.let {
+                MiniPoster(client, it, pw, Modifier.align(Alignment.TopStart).offset(x = width * 0.92f - pw, y = height * 0.14f).rotate(12f))
+            }
+            posters.getOrNull(0)?.let {
+                MiniPoster(client, it, pw, Modifier.align(Alignment.TopStart).offset(x = (width - pw) / 2, y = height * 0.05f))
+            }
         }
         Box(
             Modifier.fillMaxWidth().height(height * 0.4f).align(Alignment.BottomStart)

@@ -143,7 +143,7 @@ fun HomeScreen(
             item {
                 LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     itemsIndexed(views, key = { _, v -> v.id }) { idx, v ->
-                        LibraryStack(client, v, idx, if (isTv) 300.dp else 210.dp, if (isTv) 220.dp else 170.dp) { onOpen(v) }
+                        LibraryStack(client, v, idx, if (isTv) 320.dp else 250.dp, if (isTv) 190.dp else 150.dp) { onOpen(v) }
                     }
                 }
             }
