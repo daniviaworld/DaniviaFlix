@@ -205,7 +205,7 @@ class EmbyClient(ctx: Context) {
 
     private fun parseItems(txt: String): List<Item> {
         val arr = JSONObject(txt).optJSONArray("Items") ?: return emptyList()
-        return (0 until arr.length()).map { arr.getJSONObject(it).toItem() }
+        return (0 until arr.length()).map { arr.getJSONObject(it).toItem() }.distinctBy { it.id }
     }
 
     /** Bibliotecas en el mismo orden que las tienes configuradas en Emby. */
@@ -290,7 +290,7 @@ class EmbyClient(ctx: Context) {
             u("/Users/${uid()}/Items/Latest", "ParentId" to view.id, "Limit" to "20", "GroupItems" to "true", "Fields" to fields)
         )
         val arr = JSONArray(txt)
-        return (0 until arr.length()).map { arr.getJSONObject(it).toItem() }
+        return (0 until arr.length()).map { arr.getJSONObject(it).toItem() }.distinctBy { it.id }
     }
 
     // ---------- Categorías y "momentos" ----------
@@ -307,7 +307,7 @@ class EmbyClient(ctx: Context) {
         val q = mutableListOf("ParentId" to view.id, "UserId" to uid(), "SortBy" to "SortName", "Recursive" to "true")
         typesFor(view)?.let { q += "IncludeItemTypes" to it }
         val arr = JSONObject(call("GET", u("/Genres", *q.toTypedArray()))).optJSONArray("Items") ?: return emptyList()
-        return (0 until arr.length()).map { arr.getJSONObject(it).optString("Name") }.filter { it.isNotBlank() }
+        return (0 until arr.length()).map { arr.getJSONObject(it).optString("Name") }.filter { it.isNotBlank() }.distinct()
     }
 
     suspend fun byGenre(view: Item, genre: String, limit: Int, sortBy: String = "SortName", order: String = "Ascending"): List<Item> {

@@ -6,7 +6,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -22,6 +29,16 @@ import androidx.compose.ui.platform.LocalContext
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Si la app se cierra por un fallo, guarda el motivo para enseñarlo al volver a abrirla.
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                getSharedPreferences("danivia", Context.MODE_PRIVATE).edit()
+                    .putString("lastCrash", android.util.Log.getStackTraceString(e).take(2500)).commit()
+            } catch (_: Throwable) {
+            }
+            previous?.uncaughtException(t, e)
+        }
         setContent {
             DaniviaTheme {
                 // Sin esta superficie el texto salía negro sobre el fondo oscuro.
@@ -41,6 +58,7 @@ fun App() {
     var splashDone by remember { mutableStateOf(false) }
     var restored by remember { mutableStateOf<Boolean?>(null) }
     val stack = remember { mutableStateListOf<Screen>(Screen.Home) }
+    var crash by remember { mutableStateOf(prefs.getString("lastCrash", null)) }
 
     // Recupera la sesión guardada (si el servidor responde 401 se pide el login de nuevo).
     LaunchedEffect(Unit) {
@@ -127,5 +145,25 @@ fun App() {
                 }
             }
         }
+    }
+
+    crash?.let { text ->
+        AlertDialog(
+            onDismissRequest = { },
+            containerColor = Surface2,
+            title = { Text("La app se cerró por un fallo") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("Haz una captura de este mensaje y envíasela a Claude:", fontSize = 13.sp)
+                    Text(text, fontSize = 10.sp, color = TextMuted)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    prefs.edit().remove("lastCrash").apply()
+                    crash = null
+                }) { Text("Cerrar") }
+            },
+        )
     }
 }
