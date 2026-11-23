@@ -39,6 +39,7 @@ data class Item(
     val primaryTag: String?,
     val backdropTag: String?,
     val played: Boolean,
+    val seriesPrimaryTag: String? = null,
 )
 
 data class SubInfo(val url: String, val mime: String, val lang: String?, val label: String)
@@ -79,6 +80,7 @@ fun JSONObject.toItem(): Item {
         primaryTag = tags?.str("Primary"),
         backdropTag = if (bd != null && bd.length() > 0) bd.optString(0) else null,
         played = ud?.optBoolean("Played") ?: false,
+        seriesPrimaryTag = str("SeriesPrimaryImageTag"),
     )
 }
 
@@ -146,7 +148,7 @@ class EmbyClient(ctx: Context) {
 
     var session: Session? = null
 
-    private val fields = "Overview,ProductionYear,CommunityRating,RunTimeTicks,UserData,ImageTags,BackdropImageTags,SeriesId,SeriesName,ParentIndexNumber,IndexNumber"
+    private val fields = "Overview,ProductionYear,CommunityRating,RunTimeTicks,UserData,ImageTags,BackdropImageTags,SeriesId,SeriesName,SeriesPrimaryImageTag,ParentIndexNumber,IndexNumber"
 
     private fun authHeader(): String {
         val model = Build.MODEL.replace("\"", "")
@@ -263,6 +265,27 @@ class EmbyClient(ctx: Context) {
         val s = session ?: return null
         val tag = (if (type == "Backdrop") item.backdropTag else item.primaryTag) ?: return null
         return "${s.server}/emby/Items/${item.id}/Images/$type?maxHeight=$maxHeight&quality=90&tag=$tag&api_key=${s.token}"
+    }
+
+    /** Póster vertical: para un episodio usa el póster de su serie. */
+    fun poster(item: Item, maxHeight: Int = 600): String? {
+        val s = session ?: return null
+        val sid = item.seriesId
+        val stag = item.seriesPrimaryTag
+        if (item.type == "Episode" && sid != null && stag != null) {
+            return "${s.server}/emby/Items/$sid/Images/Primary?maxHeight=$maxHeight&quality=90&tag=$stag&api_key=${s.token}"
+        }
+        return image(item, "Primary", maxHeight)
+    }
+
+    /** Lo último añadido dentro de una biblioteca (como las filas de la portada de Emby). */
+    suspend fun latestIn(view: Item): List<Item> {
+        val txt = call(
+            "GET",
+            u("/Users/${uid()}/Items/Latest", "ParentId" to view.id, "Limit" to "20", "GroupItems" to "true", "Fields" to fields)
+        )
+        val arr = JSONArray(txt)
+        return (0 until arr.length()).map { arr.getJSONObject(it).toItem() }
     }
 
     // ---------- Reproducción ----------

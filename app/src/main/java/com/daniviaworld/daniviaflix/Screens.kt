@@ -216,7 +216,7 @@ private fun TopBar(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun Section(title: String, pad: Dp, content: @Composable () -> Unit) {
+internal fun Section(title: String, pad: Dp, content: @Composable () -> Unit) {
     Column {
         Text(
             title, fontSize = 18.sp, fontWeight = FontWeight.Bold,
@@ -289,107 +289,6 @@ fun LoginScreen(client: EmbyClient, initialServer: String, onLoggedIn: (Session)
             ) { Text(if (busy) "Conectando…" else "Entrar", fontWeight = FontWeight.Bold) }
         }
     }
-}
-
-// ---------------------------------------------------------------- Inicio
-
-@Composable
-fun HomeScreen(
-    client: EmbyClient,
-    onOpen: (Item) -> Unit,
-    onPlay: (Item, Long) -> Unit,
-    onLogout: () -> Unit,
-) {
-    val isTv = rememberIsTv()
-    val pad = if (isTv) 48.dp else 16.dp
-    val posterW = if (isTv) 150.dp else 118.dp
-    val wideW = if (isTv) 250.dp else 190.dp
-    val tileW = if (isTv) 280.dp else 210.dp
-    val scope = rememberCoroutineScope()
-    var views by remember { mutableStateOf<List<Item>>(emptyList()) }
-    var resume by remember { mutableStateOf<List<Item>>(emptyList()) }
-    var latest by remember { mutableStateOf<List<Item>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val ctx = LocalContext.current
-    var update by remember { mutableStateOf<UpdateInfo?>(null) }
-
-    // Al abrir, mira en silencio si hay una versión nueva en GitHub y pregunta si quieres instalarla.
-    LaunchedEffect(Unit) { update = Updater.check(ctx) }
-
-    LaunchedEffect(Unit) {
-        try {
-            views = client.views().filter { it.collectionType != "livetv" && it.collectionType != "music" }
-            resume = client.resume()
-            latest = client.latest()
-        } catch (e: Exception) {
-            error = friendlyError(e)
-        }
-        loading = false
-    }
-
-    LazyColumn(Modifier.fillMaxSize().background(Bg), contentPadding = PaddingValues(bottom = 32.dp)) {
-        item {
-            Row(Modifier.fillMaxWidth().padding(horizontal = pad, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                DMark(36.dp)
-                Spacer(Modifier.width(10.dp))
-                Wordmark(18.sp)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = {
-                    scope.launch {
-                        try {
-                            client.random()?.let { onOpen(it) }
-                        } catch (e: Exception) {
-                            error = friendlyError(e)
-                        }
-                    }
-                }) { Text("Sorpréndeme", color = Amber) }
-                TextButton(onClick = onLogout) { Text("Salir", color = TextMuted) }
-            }
-        }
-        val err = error
-        if (err != null) item { Text(err, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(horizontal = pad, vertical = 8.dp)) }
-        if (loading) item {
-            Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Amber) }
-        }
-        if (resume.isNotEmpty()) item {
-            Section("Continuar viendo", pad) {
-                LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(resume, key = { it.id }) { i ->
-                        PosterCard(client, i, Modifier.width(if (i.type == "Episode") wideW else posterW)) { onPlay(i, i.resumeMs) }
-                    }
-                }
-            }
-        }
-        if (views.isNotEmpty()) item {
-            Section("Mis bibliotecas", pad) {
-                LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(views, key = { it.id }) { v -> LibraryTile(client, v, Modifier.width(tileW)) { onOpen(v) } }
-                }
-            }
-        }
-        if (latest.isNotEmpty()) item {
-            Section("Añadido recientemente", pad) {
-                LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(latest, key = { it.id }) { i -> PosterCard(client, i, Modifier.width(posterW)) { onOpen(i) } }
-                }
-            }
-        }
-        item {
-            TextButton(
-                onClick = {
-                    scope.launch {
-                        val u = Updater.check(ctx)
-                        if (u != null) update = u
-                        else Toast.makeText(ctx, "Ya tienes la última versión", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                modifier = Modifier.padding(horizontal = pad - 8.dp, vertical = 8.dp),
-            ) { Text("Versión ${Updater.versionName(ctx)} · Buscar actualización", color = TextMuted, fontSize = 12.sp) }
-        }
-    }
-
-    update?.let { u -> UpdateDialog(u) { update = null } }
 }
 
 // ---------------------------------------------------------------- Biblioteca
