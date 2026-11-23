@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -598,7 +597,7 @@ private fun GroupsScreen(groups: List<Pair<String, Int>>, total: Int, onAdd: () 
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-            gridItems(all.size) { i ->
+            items(all.size) { i ->
                 val (g, n) = all[i]
                 GroupCard(
                     if (g.isEmpty()) "Todos los canales" else g, n, groupColors[i % groupColors.size],
@@ -668,7 +667,7 @@ private fun ChannelsGrid(client: EmbyClient, title: String, list: List<Channel>,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-            gridItems(list.size, key = { list[it].id }) { i ->
+            items(list.size, key = { list[it].id }) { i ->
                 ChannelTile(client, list[i], now, if (i == current) Modifier.focusRequester(req) else Modifier) { onPick(i) }
             }
         }
