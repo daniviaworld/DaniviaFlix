@@ -1,0 +1,43 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Compilar APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Preparar archivo
+        run: cp app/build/outputs/apk/release/app-release.apk DaniviaFlix.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DaniviaFlix
+          path: DaniviaFlix.apk
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.run_number }}
+          name: DaniviaFlix 0.1.${{ github.run_number }}
+          body: Nueva versión de DaniviaFlix.
+          files: DaniviaFlix.apk
+          make_latest: true
