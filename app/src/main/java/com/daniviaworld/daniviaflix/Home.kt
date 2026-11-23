@@ -39,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -137,7 +138,10 @@ fun HomeScreen(
         }
 
         // Cartelera: carrusel curvo con el color del póster de fondo.
-        if (hero.isNotEmpty()) item { Cartelera(client, hero, isTv, onOpen, onPlay) }
+        if (hero.isNotEmpty()) item {
+            // Si la lista cambia (llegan más datos), se recrea la cartelera para que el carrusel no se descuadre.
+            key(hero.map { it.id }) { Cartelera(client, hero, isTv, onOpen, onPlay) }
+        }
 
         // ¿Qué te apetece?: elige según el momento en lugar de filas repetidas.
         item { Section("¿Qué te apetece?", pad) {} }
@@ -268,10 +272,10 @@ private fun Cartelera(
                 state = state,
                 contentPadding = PaddingValues(horizontal = side),
                 pageSize = PageSize.Fixed(pageW),
-                key = { items[it].id },
+                key = { items.getOrNull(it)?.id ?: it },
                 modifier = Modifier.fillMaxSize(),
             ) { page ->
-                val item = items[page]
+                val item = items.getOrNull(page) ?: return@HorizontalPager
                 Box(
                     Modifier
                         .fillMaxHeight()
