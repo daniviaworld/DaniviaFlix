@@ -21,6 +21,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -249,6 +253,8 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
     var banner by remember { mutableStateOf(false) }
     var digits by remember { mutableStateOf("") }
     var reload by remember { mutableStateOf(0) }
+    var mode by remember { mutableStateOf(0) } // 0 grupos · 1 canales del grupo · 2 reproduciendo
+    var group by remember { mutableStateOf("") }
     var diag by remember { mutableStateOf<String?>(null) }
     var showIptv by remember { mutableStateOf(false) }
     var browseId by remember { mutableStateOf<String?>(null) }
@@ -286,24 +292,28 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
             emptyList()
         }
         val lib = try {
-            client.libraryChannels(client.views().filter { isTvView(it) }).second
+            client.libraryChannels(client.views().filter { isTvView(it) })
         } catch (e: Exception) {
             emptyList()
         }
         val extra = Iptv.loadAll(ctx)
-        channels = (emby + lib + extra).mapIndexed { i, c -> if (c.number.isBlank()) c.copy(number = (i + 1).toString()) else c }
-        val last = Prefs.lastChannel(ctx)
-        idx = channels.indexOfFirst { it.id == last }.coerceAtLeast(0)
+        channels = (emby + lib + extra).mapIndexed { i, c ->
+            c.copy(number = c.number.ifBlank { (i + 1).toString() }, group = c.group.ifBlank { "Otros" })
+        }
+        idx = 0
         if (channels.isEmpty()) diag = try { client.liveDiag() } catch (e: Exception) { null }
         loaded = true
     }
 
-    val cur = channels.getOrNull(idx)
+    val list = if (group.isEmpty()) channels else channels.filter { it.group == group }
+    val groups = remember(channels) { channels.groupBy { it.group }.map { it.key to it.value.size } }
+    val cur = list.getOrNull(idx)
     val shownId = if (overlay) (browseId ?: cur?.id) else cur?.id
 
     // Al cambiar de canal: se recuerda, se enseña el cartel un momento y se oculta.
-    LaunchedEffect(cur?.id) {
+    LaunchedEffect(cur?.id, mode) {
         val c = cur ?: return@LaunchedEffect
+        if (mode != 2) return@LaunchedEffect
         Prefs.setLastChannel(ctx, c.id)
         banner = true
         delay(5000)
@@ -330,12 +340,12 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
         delay(1500)
         val n = digits
         digits = ""
-        val i = channels.indexOfFirst { it.number == n }
+        val i = list.indexOfFirst { it.number == n }
         if (i >= 0) idx = i
     }
     // El foco va a la lista al abrirla y vuelve al vídeo al cerrarla.
-    LaunchedEffect(overlay, loaded) {
-        if (!loaded || channels.isEmpty()) return@LaunchedEffect
+    LaunchedEffect(overlay, loaded, mode) {
+        if (!loaded || list.isEmpty() || mode != 2) return@LaunchedEffect
         if (overlay) {
             listState.scrollToItem((idx - 3).coerceAtLeast(0))
             delay(80)
@@ -353,11 +363,13 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
         }
     }
 
+    BackHandler(enabled = mode == 1) { mode = 0 }
+    BackHandler(enabled = mode == 2 && !overlay) { mode = 1 }
     BackHandler(enabled = overlay) { overlay = false }
 
     fun zap(delta: Int) {
-        if (channels.isEmpty()) return
-        idx = (idx + delta + channels.size) % channels.size
+        if (list.isEmpty()) return
+        idx = (idx + delta + list.size) % list.size
     }
 
     BoxWithConstraints(
@@ -365,7 +377,7 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
             .fillMaxSize()
             .background(Color.Black)
             .onKeyEvent { e ->
-                if (e.type != KeyEventType.KeyDown || overlay || channels.isEmpty()) return@onKeyEvent false
+                if (e.type != KeyEventType.KeyDown || overlay || mode != 2 || channels.isEmpty()) return@onKeyEvent false
                 val d = digitOf(e.key)
                 when {
                     d != null -> {
@@ -388,15 +400,26 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
                     else -> false
                 }
             }
-            .focusRequester(rootFocus)
-            .focusable()
-            .pointerInput(Unit) { detectTapGestures { overlay = !overlay } }
+            .then(if (mode == 2) Modifier.focusRequester(rootFocus).focusable() else Modifier)
+            .pointerInput(mode) { detectTapGestures { if (mode == 2) overlay = !overlay } }
     ) {
         if (showIptv) IptvDialog(onClose = { showIptv = false }, onChanged = { reload++ })
         val wide = maxWidth > 700.dp
         val panelW = if (maxWidth > 1000.dp) 460.dp else if (wide) 360.dp else 300.dp
 
-        if (cur != null) {
+        if (loaded && channels.isNotEmpty() && mode == 0) {
+            GroupsScreen(groups, channels.size, onAdd = { showIptv = true }) { g ->
+                group = g
+                idx = 0
+                mode = 1
+            }
+        } else if (loaded && channels.isNotEmpty() && mode == 1) {
+            ChannelsGrid(client, group.ifEmpty { "Todos los canales" }, list, idx, now) { i ->
+                idx = i
+                overlay = false
+                mode = 2
+            }
+        } else if (cur != null) {
             androidx.compose.runtime.key(cur.id) { LivePlayer(client, cur, Modifier.fillMaxSize()) }
         } else if (!loaded) {
             CircularProgressIndicator(color = Amber, modifier = Modifier.align(Alignment.Center))
@@ -414,7 +437,7 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
         }
 
         // Cartel del canal (al cambiar).
-        if (cur != null && banner && !overlay) {
+        if (cur != null && mode == 2 && banner && !overlay) {
             val list = progs?.takeIf { it.first == cur.id }?.second.orEmpty()
             val nowP = list.firstOrNull { now in it.startMs until it.endMs } ?: cur.now
             val nextP = list.firstOrNull { nowP != null && it.startMs >= nowP.endMs }
@@ -459,7 +482,7 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
         }
 
         // Lista de canales + programación.
-        if (overlay && channels.isNotEmpty()) {
+        if (overlay && mode == 2 && list.isNotEmpty()) {
             Row(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color(0xF20B0B14), Color(0xCC0B0B14), Color(0x330B0B14))))) {
                 LazyColumn(
                     state = listState,
@@ -468,12 +491,12 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     item {
-                        androidx.compose.material3.OutlinedButton(onClick = { showIptv = true }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Añadir o quitar listas (M3U / Xtream)")
-                        }
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = { overlay = false; mode = 1 }, modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Volver a los canales") }
                     }
-                    items(channels.size, key = { channels[it].id }) { i ->
-                        val ch = channels[i]
+                    items(list.size, key = { list[it].id }) { i ->
+                        val ch = list[i]
                         ChannelRow(
                             client, ch, i == idx, now,
                             if (i == idx) Modifier.focusRequester(rowFocus) else Modifier,
@@ -485,7 +508,7 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
                     }
                 }
                 if (wide) {
-                    val shown = channels.firstOrNull { it.id == shownId } ?: cur
+                    val shown = list.firstOrNull { it.id == shownId } ?: cur
                     val list = progs?.takeIf { it.first == shown?.id }?.second.orEmpty()
                     Column(Modifier.weight(1f).fillMaxHeight().padding(32.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (shown != null) {
@@ -513,6 +536,140 @@ fun TvScreen(client: EmbyClient, onExit: () -> Unit) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+private val groupColors = listOf(
+    Color(0xFF7B2FF7) to Color(0xFF3B82F6), Color(0xFFFFB547) to Color(0xFFFF4D6D),
+    Color(0xFF0F766E) to Color(0xFF22D3EE), Color(0xFFFF4D6D) to Color(0xFF7B2FF7),
+    Color(0xFF16A34A) to Color(0xFF22D3EE), Color(0xFFF97316) to Color(0xFFEAB308),
+)
+
+@Composable
+private fun GroupCard(name: String, count: Int, colors: Pair<Color, Color>, modifier: Modifier, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(18.dp)
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(110.dp)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick)
+            .clip(shape)
+            .focusRing(focused, shape)
+            .background(Brush.linearGradient(listOf(colors.first, colors.second)))
+            .padding(16.dp),
+        contentAlignment = Alignment.BottomStart,
+    ) {
+        Column {
+            Text(name, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("$count canales", fontSize = 12.sp, color = Color(0xE6FFFFFF))
+        }
+    }
+}
+
+/** Primera pantalla de TV: los grupos de canales (carpetas de Emby, categorías Xtream, group-title de M3U). */
+@Composable
+private fun GroupsScreen(groups: List<Pair<String, Int>>, total: Int, onAdd: () -> Unit, onPick: (String) -> Unit) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(120)
+        try {
+            first.requestFocus()
+        } catch (e: Exception) {
+            // aún sin foco
+        }
+    }
+    val all = listOf("" to total) + groups
+    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 48.dp, vertical = 28.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("TV", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                Text("Elige un grupo de canales", color = TextMuted, fontSize = 15.sp)
+            }
+            androidx.compose.material3.OutlinedButton(onClick = onAdd) { Text("Añadir o quitar listas") }
+        }
+        Spacer(Modifier.height(18.dp))
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(210.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(bottom = 24.dp),
+        ) {
+            gridItems(all.size) { i ->
+                val (g, n) = all[i]
+                GroupCard(
+                    if (g.isEmpty()) "Todos los canales" else g, n, groupColors[i % groupColors.size],
+                    if (i == 0) Modifier.focusRequester(first) else Modifier,
+                ) { onPick(g) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChannelTile(client: EmbyClient, ch: Channel, now: Long, modifier: Modifier, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick)
+            .clip(shape)
+            .focusRing(focused, shape)
+            .background(if (focused) Color(0x33FFFFFF) else Color(0x14FFFFFF))
+            .padding(10.dp),
+    ) {
+        Box(
+            Modifier.fillMaxWidth().height(70.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xF2FFFFFF)),
+            contentAlignment = Alignment.Center,
+        ) {
+            val logo = client.logo(ch, 200)
+            if (logo != null) {
+                AsyncImage(model = logo, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(6.dp))
+            } else {
+                Text(ch.name.take(2).uppercase(), color = Color(0xFF333344), fontWeight = FontWeight.Bold, fontSize = 22.sp)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(ch.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        val np = ch.now
+        if (np != null && np.endMs > now) {
+            Text(np.name, fontSize = 12.sp, color = TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Canales del grupo elegido: tú eliges cuál abrir. */
+@Composable
+private fun ChannelsGrid(client: EmbyClient, title: String, list: List<Channel>, current: Int, now: Long, onPick: (Int) -> Unit) {
+    val state = rememberLazyGridState()
+    val req = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        state.scrollToItem(current.coerceIn(0, (list.size - 1).coerceAtLeast(0)))
+        delay(120)
+        try {
+            req.requestFocus()
+        } catch (e: Exception) {
+            // aún sin foco
+        }
+    }
+    Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 48.dp, vertical = 28.dp)) {
+        Text(title, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("${list.size} canales · Atrás para volver a los grupos", color = TextMuted, fontSize = 14.sp)
+        Spacer(Modifier.height(14.dp))
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(180.dp),
+            state = state,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 24.dp),
+        ) {
+            gridItems(list.size, key = { list[it].id }) { i ->
+                ChannelTile(client, list[i], now, if (i == current) Modifier.focusRequester(req) else Modifier) { onPick(i) }
             }
         }
     }

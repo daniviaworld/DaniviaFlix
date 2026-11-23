@@ -48,7 +48,7 @@ data class Program(val name: String, val startMs: Long, val endMs: Long, val ove
 data class Channel(
     val id: String, val name: String, val number: String, val logoTag: String?, val now: Program?,
     val url: String? = null, val logoUrl: String? = null, val alt: String? = null,
-    val vod: Boolean = false,
+    val vod: Boolean = false, val group: String = "",
 )
 
 /** Biblioteca de Emby que en realidad son tus canales (p. ej. "TV online"). */
@@ -458,6 +458,7 @@ class EmbyClient(ctx: Context) {
         o.optString("Id"), o.optString("Name"),
         o.optString("Number").ifEmpty { o.optString("ChannelNumber") },
         o.optJSONObject("ImageTags")?.str("Primary"), o.optJSONObject("CurrentProgram")?.toProgram(),
+        group = "TV en directo",
     )
 
     /** Texto de diagnóstico: qué responde Emby a cada vía de TV en directo. */
@@ -484,7 +485,7 @@ class EmbyClient(ctx: Context) {
     }
 
     /** Canales que están guardados como elementos dentro de una biblioteca normal de Emby. */
-    suspend fun libraryChannels(views: List<Item>, limit: Int = 5000): Pair<Int, List<Channel>> {
+    suspend fun libraryPreview(views: List<Item>, limit: Int = 6): Pair<Int, List<Channel>> {
         var total = 0
         val out = ArrayList<Channel>()
         for (v in views) {
@@ -509,6 +510,53 @@ class EmbyClient(ctx: Context) {
             }
         }
         return total to out.distinctBy { it.id }
+    }
+
+    /** Canales de una biblioteca de Emby; las carpetas de primer nivel se usan como grupos. */
+    suspend fun libraryChannels(views: List<Item>): List<Channel> {
+        val out = ArrayList<Channel>()
+        fun add(arr: org.json.JSONArray?, group: String, skipFolders: Boolean) {
+            if (arr == null) return
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                if (skipFolders && o.optBoolean("IsFolder")) continue
+                out.add(Channel(o.optString("Id"), o.optString("Name"), "", o.optJSONObject("ImageTags")?.str("Primary"), null, vod = true, group = group))
+            }
+        }
+        for (v in views) {
+            try {
+                val top = JSONObject(
+                    call("GET", u("/Users/${uid()}/Items", "ParentId" to v.id, "SortBy" to "SortName", "Limit" to "2000", "Fields" to "ImageTags"))
+                ).optJSONArray("Items")
+                add(top, v.name, true)
+                val folders = ArrayList<Pair<String, String>>()
+                if (top != null) {
+                    for (i in 0 until top.length()) {
+                        val o = top.getJSONObject(i)
+                        if (o.optBoolean("IsFolder")) folders.add(o.optString("Id") to o.optString("Name"))
+                    }
+                }
+                for ((fid, fname) in folders) {
+                    try {
+                        val arr = JSONObject(
+                            call(
+                                "GET",
+                                u(
+                                    "/Users/${uid()}/Items", "ParentId" to fid, "Recursive" to "true", "IsFolder" to "false",
+                                    "SortBy" to "SortName", "Limit" to "5000", "Fields" to "ImageTags",
+                                )
+                            )
+                        ).optJSONArray("Items")
+                        add(arr, fname, false)
+                    } catch (ex: Exception) {
+                        // carpeta ilegible
+                    }
+                }
+            } catch (ex: Exception) {
+                // biblioteca ilegible
+            }
+        }
+        return out.distinctBy { it.id }
     }
 
     suspend fun channels(): List<Channel> {

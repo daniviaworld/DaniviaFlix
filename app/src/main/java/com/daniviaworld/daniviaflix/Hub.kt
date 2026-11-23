@@ -205,7 +205,7 @@ fun HubScreen(
                     val v = client.views()
                     views = v
                     val tvv = v.filter { isTvView(it) }
-                    if (tvv.isNotEmpty()) launch { tvLib = client.libraryChannels(tvv, 6) }
+                    if (tvv.isNotEmpty()) launch { tvLib = client.libraryPreview(tvv, 6) }
                     val mv = v.filter { it.collectionType == "movies" && !isTvView(it) }
                     val sv = v.filter { it.collectionType == "tvshows" }
                     launch {

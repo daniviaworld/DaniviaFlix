@@ -81,6 +81,7 @@ object Iptv {
         var name = ""
         var logo: String? = null
         var num = ""
+        var grp = ""
         for (raw in txt.lineSequence()) {
             val l = raw.trim()
             if (l.isEmpty()) continue
@@ -88,8 +89,10 @@ object Iptv {
                 name = l.substringAfterLast(",").trim()
                 logo = attr(l, "tvg-logo")
                 num = attr(l, "tvg-chno") ?: ""
+                grp = attr(l, "group-title") ?: ""
             } else if (!l.startsWith("#")) {
-                out.add(Channel("iptv:${src.id}:${out.size}", name.ifEmpty { l }, num, null, null, url = l, logoUrl = http(logo)))
+                out.add(Channel("iptv:${src.id}:${out.size}", name.ifEmpty { l }, num, null, null, url = l, logoUrl = http(logo), group = grp.ifEmpty { src.name.ifEmpty { "Lista M3U" } }))
+                grp = ""
                 name = ""
                 logo = null
                 num = ""
@@ -108,6 +111,16 @@ object Iptv {
         val u = src.user.trim()
         val p = src.pass.trim()
         val q = "username=${URLEncoder.encode(u, "UTF-8")}&password=${URLEncoder.encode(p, "UTF-8")}"
+        val cats = HashMap<String, String>()
+        try {
+            val ca = JSONArray(fetch("$base/player_api.php?$q&action=get_live_categories"))
+            for (k in 0 until ca.length()) {
+                val o = ca.getJSONObject(k)
+                cats[o.optString("category_id")] = o.optString("category_name")
+            }
+        } catch (ex: Exception) {
+            // sin categorías: todo irá a "Otros"
+        }
         val arr = JSONArray(fetch("$base/player_api.php?$q&action=get_live_streams"))
         (0 until arr.length()).map {
             val o = arr.getJSONObject(it)
@@ -116,6 +129,7 @@ object Iptv {
                 "iptv:${src.id}:$sid", o.optString("name"), o.optString("num"), null, null,
                 url = "$base/live/$u/$p/$sid.m3u8", logoUrl = http(o.optString("stream_icon")),
                 alt = "$base/live/$u/$p/$sid.ts",
+                group = cats[o.optString("category_id")]?.takeIf { it.isNotBlank() } ?: "Otros",
             )
         }
     }
