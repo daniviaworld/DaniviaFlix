@@ -74,6 +74,14 @@ fun App() {
             stack.add(Screen.Detail(i))
         }
     }
+    val logout: () -> Unit = {
+        // Se conservan la dirección del servidor y los ajustes; solo se borra la sesión.
+        prefs.edit().remove("token").remove("userId").remove("user").apply()
+        client.session = null
+        stack.clear()
+        stack.add(Screen.Home)
+        phase = "login"
+    }
     val pop: () -> Unit = { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
 
     when (phase) {
@@ -97,15 +105,11 @@ fun App() {
                         onOpen = open,
                         onPlay = { i, ms -> stack.add(Screen.Player(i, ms)) },
                         onGroup = { g -> stack.add(g) },
-                        onLogout = {
-                            val server = prefs.getString("server", "") ?: ""
-                            prefs.edit().clear().putString("server", server).apply()
-                            client.session = null
-                            stack.clear()
-                            stack.add(Screen.Home)
-                            phase = "login"
-                        },
+                        onSearch = { stack.add(Screen.Search) },
+                        onSettings = { stack.add(Screen.Settings) },
                     )
+                    is Screen.Settings -> SettingsScreen(client, onBack = pop, onLogout = logout)
+                    is Screen.Search -> SearchScreen(client, onBack = pop, onOpen = open)
                     is Screen.Library -> LibraryScreen(client, current.view, onBack = pop, onOpen = open, onGroup = { g -> stack.add(g) })
                     is Screen.Group -> GroupScreen(client, current, onBack = pop, onOpen = open)
                     is Screen.Detail -> DetailScreen(
@@ -113,7 +117,13 @@ fun App() {
                         onPlay = { i, ms -> stack.add(Screen.Player(i, ms)) },
                         onOpen = open,
                     )
-                    is Screen.Player -> PlayerScreen(client, current.item, current.startMs, onExit = pop)
+                    is Screen.Player -> PlayerScreen(
+                        client, current.item, current.startMs, onExit = pop,
+                        onNext = { n ->
+                            stack.removeAt(stack.lastIndex)
+                            stack.add(Screen.Player(n, 0L))
+                        },
+                    )
                 }
             }
         }

@@ -49,7 +49,7 @@ private val sortOptions = listOf(
 )
 
 @Composable
-private fun PosterGrid(client: EmbyClient, list: List<Item>, isTv: Boolean, onOpen: (Item) -> Unit) {
+internal fun PosterGrid(client: EmbyClient, list: List<Item>, isTv: Boolean, onOpen: (Item) -> Unit) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(if (isTv) 160.dp else 112.dp),
         contentPadding = PaddingValues(16.dp),
@@ -215,7 +215,11 @@ fun GroupScreen(client: EmbyClient, g: Screen.Group, onBack: () -> Unit, onOpen:
     LaunchedEffect(g) {
         try {
             val v = g.view
-            list = if (g.kind == "genre" && v != null) client.byGenre(v, g.arg, 500) else client.mood(g.arg)
+            list = when {
+                g.kind == "genre" && v != null -> client.byGenre(v, g.arg, 500)
+                g.kind == "favorites" -> client.favorites()
+                else -> client.mood(g.arg)
+            }
         } catch (e: Exception) {
             error = friendlyError(e)
         }
@@ -228,7 +232,7 @@ fun GroupScreen(client: EmbyClient, g: Screen.Group, onBack: () -> Unit, onOpen:
         if (loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Amber) }
         } else if (list.isEmpty() && err == null) {
-            Text("No hay nada que mostrar aquí todavía.", color = TextMuted, modifier = Modifier.padding(16.dp))
+            Text(if (g.kind == "favorites") "Aún no tienes favoritos. Abre una película o serie y pulsa «Añadir a favoritos»." else "No hay nada que mostrar aquí todavía.", color = TextMuted, modifier = Modifier.padding(16.dp))
         } else {
             PosterGrid(client, list, isTv, onOpen)
         }

@@ -26,6 +26,10 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -69,7 +73,8 @@ fun HomeScreen(
     onOpen: (Item) -> Unit,
     onPlay: (Item, Long) -> Unit,
     onGroup: (Screen.Group) -> Unit,
-    onLogout: () -> Unit,
+    onSearch: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     val isTv = rememberIsTv()
     val pad = if (isTv) 48.dp else 16.dp
@@ -80,6 +85,7 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     var views by remember { mutableStateOf<List<Item>>(emptyList()) }
     var resume by remember { mutableStateOf<List<Item>>(emptyList()) }
+    var favs by remember { mutableStateOf<List<Item>>(emptyList()) }
     var latest by remember { mutableStateOf<List<Item>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -93,6 +99,11 @@ fun HomeScreen(
             views = client.views().filter { it.collectionType != "livetv" && it.collectionType != "music" }
             resume = client.resume()
             latest = client.latest()
+            favs = try {
+                client.favorites()
+            } catch (e: Exception) {
+                emptyList()
+            }
         } catch (e: Exception) {
             error = friendlyError(e)
         }
@@ -101,25 +112,20 @@ fun HomeScreen(
 
     val hero = remember(resume, latest) { (resume.take(4) + latest).distinctBy { it.id }.take(12) }
 
-    LazyColumn(Modifier.fillMaxSize().background(Bg), contentPadding = PaddingValues(bottom = 32.dp)) {
+    LazyColumn(Modifier.fillMaxSize().background(Bg), contentPadding = PaddingValues(bottom = 40.dp)) {
         item {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = pad, vertical = 14.dp),
+                Modifier.fillMaxWidth().padding(horizontal = pad, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                DMark(32.dp)
+                DMark(30.dp)
                 Spacer(Modifier.width(10.dp))
-                Wordmark(if (isTv) 20.sp else 15.sp)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = {
-                    scope.launch {
-                        try {
-                            client.random()?.let { onOpen(it) }
-                        } catch (e: Exception) {
-                            error = friendlyError(e)
-                        }
-                    }
-                }) { Text("Sorpréndeme", color = Amber, maxLines = 1, softWrap = false, fontSize = 13.sp) }
+                Box(Modifier.weight(1f)) { Wordmark(if (isTv) 20.sp else 14.sp) }
+                NavIcon(Icons.Filled.Search, "Buscar") { onSearch() }
+                Spacer(Modifier.width(8.dp))
+                NavIcon(Icons.Filled.Favorite, "Favoritos") { onGroup(Screen.Group("Mis favoritos", null, "favorites", "")) }
+                Spacer(Modifier.width(8.dp))
+                NavIcon(Icons.Filled.Settings, "Ajustes") { onSettings() }
             }
         }
         val err = error
@@ -135,15 +141,28 @@ fun HomeScreen(
 
         // ¿Qué te apetece?: elige según el momento en lugar de filas repetidas.
         item { Section("¿Qué te apetece?", pad) {} }
-        item { MoodGrid(pad) { m -> onGroup(Screen.Group(m.label, null, "mood", m.kind)) } }
+        item {
+            MoodGrid(pad) { m ->
+                when (m.kind) {
+                    "random" -> scope.launch {
+                        try {
+                            client.random()?.let { onOpen(it) }
+                        } catch (e: Exception) {
+                            error = friendlyError(e)
+                        }
+                    }
+                    else -> onGroup(Screen.Group(m.label, null, m.kind, m.kind))
+                }
+            }
+        }
 
-        // Tus bibliotecas como pilas de carátulas, en el orden de Emby.
+        // Tus bibliotecas, en el orden de Emby.
         if (views.isNotEmpty()) {
             item { Section("Mis bibliotecas", pad) {} }
             item {
-                LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     itemsIndexed(views, key = { _, v -> v.id }) { idx, v ->
-                        LibraryStack(client, v, idx, if (isTv) 320.dp else 250.dp, if (isTv) 190.dp else 150.dp) { onOpen(v) }
+                        LibraryStack(client, v, idx, if (isTv) 320.dp else 250.dp) { onOpen(v) }
                     }
                 }
             }
@@ -159,23 +178,39 @@ fun HomeScreen(
             }
         }
 
-        item {
-            Row(Modifier.padding(horizontal = pad - 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            val u = Updater.check(ctx)
-                            if (u != null) update = u
-                            else Toast.makeText(ctx, "Ya tienes la última versión", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                ) { Text("Versión ${Updater.versionName(ctx)} · Buscar actualización", color = TextMuted, fontSize = 12.sp) }
-                TextButton(onClick = onLogout) { Text("Salir", color = TextMuted, fontSize = 12.sp) }
+        if (favs.isNotEmpty()) item {
+            Section("Mis favoritos", pad) {
+                LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(favs, key = { it.id }) { i -> PosterCard(client, i, Modifier.width(posterW)) { onOpen(i) } }
+                }
             }
         }
+
+        // Una fila "Lo último en…" por cada biblioteca, en tu orden.
+        items(views, key = { "lib-" + it.id }) { v -> LibraryRow(client, v, pad, posterW, onOpen) }
     }
 
     update?.let { u -> UpdateDialog(u) { update = null } }
+}
+
+@Composable
+private fun LibraryRow(client: EmbyClient, view: Item, pad: androidx.compose.ui.unit.Dp, posterW: androidx.compose.ui.unit.Dp, onOpen: (Item) -> Unit) {
+    var list by remember(view.id) { mutableStateOf<List<Item>?>(null) }
+    LaunchedEffect(view.id) {
+        list = try {
+            client.latestIn(view)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+    val l = list
+    if (l != null && l.isNotEmpty()) {
+        Section("Lo último en ${view.name}", pad) {
+            LazyRow(contentPadding = PaddingValues(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(l, key = { it.id }) { i -> PosterCard(client, i, Modifier.width(posterW)) { onOpen(i) } }
+            }
+        }
+    }
 }
 
 /** Galería "Cartelera": pósters en arco 3D. El de en medio crece y el fondo se tiñe con su color. */

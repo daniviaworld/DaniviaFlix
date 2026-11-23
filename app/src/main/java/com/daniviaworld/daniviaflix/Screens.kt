@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,6 +36,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -85,6 +88,8 @@ import kotlinx.coroutines.withContext
 sealed interface Screen {
     data object Home : Screen
     data class Library(val view: Item) : Screen
+    data object Settings : Screen
+    data object Search : Screen
     data class Group(val title: String, val view: Item?, val kind: String, val arg: String) : Screen
     data class Detail(val item: Item) : Screen
     data class Player(val item: Item, val startMs: Long) : Screen
@@ -303,6 +308,7 @@ fun DetailScreen(
     onOpen: (Item) -> Unit,
 ) {
     val isTv = rememberIsTv()
+    val scope = rememberCoroutineScope()
     var item by remember { mutableStateOf(base) }
     var seasons by remember { mutableStateOf<List<Item>>(emptyList()) }
     var season by remember { mutableStateOf<Item?>(null) }
@@ -378,6 +384,23 @@ fun DetailScreen(
                                 Button(onClick = { onPlay(item, 0) }) { Text("▶  Reproducir", fontWeight = FontWeight.Bold) }
                             }
                         }
+                    }
+                    OutlinedButton(onClick = {
+                        scope.launch {
+                            try {
+                                client.setFavorite(item.id, !item.favorite)
+                                item = item.copy(favorite = !item.favorite)
+                            } catch (e: Exception) {
+                                // sin cambio si el servidor no responde
+                            }
+                        }
+                    }) {
+                        Icon(
+                            if (item.favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = null, tint = Coral, modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (item.favorite) "En favoritos" else "Añadir a favoritos")
                     }
                     if (item.overview.isNotBlank()) Text(item.overview, fontSize = 15.sp, lineHeight = 21.sp, color = Color(0xFFE6E6F0))
                 }

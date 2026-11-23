@@ -40,6 +40,7 @@ data class Item(
     val backdropTag: String?,
     val played: Boolean,
     val seriesPrimaryTag: String? = null,
+    val favorite: Boolean = false,
 )
 
 data class SubInfo(val url: String, val mime: String, val lang: String?, val label: String)
@@ -51,6 +52,7 @@ data class PlayPlan(
     val mediaSourceId: String,
     val startMs: Long,
     val subs: List<SubInfo>,
+    val info: String = "",
 )
 
 private fun JSONObject.str(key: String): String? =
@@ -81,6 +83,7 @@ fun JSONObject.toItem(): Item {
         backdropTag = if (bd != null && bd.length() > 0) bd.optString(0) else null,
         played = ud?.optBoolean("Played") ?: false,
         seriesPrimaryTag = str("SeriesPrimaryImageTag"),
+        favorite = ud?.optBoolean("IsFavorite") ?: false,
     )
 }
 
@@ -163,6 +166,8 @@ class EmbyClient(ctx: Context) {
             session?.let { b.header("X-Emby-Token", it.token) }
             if (method == "POST") {
                 b.post((body?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
+            } else if (method == "DELETE") {
+                b.delete()
             } else {
                 b.get()
             }
@@ -344,13 +349,56 @@ class EmbyClient(ctx: Context) {
         }
     }
 
+    // ---------- Favoritos, búsqueda, cuenta ----------
+
+    suspend fun favorites(): List<Item> = parseItems(
+        call(
+            "GET",
+            u(
+                "/Users/${uid()}/Items",
+                "Filters" to "IsFavorite", "Recursive" to "true", "IncludeItemTypes" to "Movie,Series,Episode,BoxSet",
+                "SortBy" to "SortName", "Fields" to fields,
+            )
+        )
+    )
+
+    suspend fun setFavorite(id: String, on: Boolean) {
+        call(if (on) "POST" else "DELETE", u("/Users/${uid()}/FavoriteItems/$id"))
+    }
+
+    suspend fun search(term: String): List<Item> = parseItems(
+        call(
+            "GET",
+            u(
+                "/Users/${uid()}/Items",
+                "SearchTerm" to term, "Recursive" to "true", "IncludeItemTypes" to "Movie,Series",
+                "Limit" to "60", "Fields" to fields,
+            )
+        )
+    )
+
+    /** Siguiente episodio de la misma serie (para pasar solo al terminar uno). */
+    suspend fun nextEpisode(ep: Item): Item? {
+        val sid = ep.seriesId ?: return null
+        val list = parseItems(call("GET", u("/Shows/$sid/Episodes", "UserId" to uid(), "Fields" to fields)))
+        val idx = list.indexOfFirst { it.id == ep.id }
+        return if (idx >= 0) list.getOrNull(idx + 1) else null
+    }
+
+    /** "Nombre del servidor · Emby 4.x" */
+    suspend fun serverInfo(): String {
+        val j = JSONObject(call("GET", u("/System/Info/Public")))
+        return listOf(j.optString("ServerName"), j.optString("Version").let { if (it.isNotEmpty()) "Emby $it" else "" })
+            .filter { it.isNotEmpty() }.joinToString(" · ")
+    }
+
     // ---------- Reproducción ----------
 
     private fun cond(prop: String, value: Int) = JSONObject()
         .put("Condition", "LessThanEqual").put("Property", prop)
         .put("Value", value.toString()).put("IsRequired", true)
 
-    private fun deviceProfile(forceTranscode: Boolean): JSONObject {
+    private fun deviceProfile(forceTranscode: Boolean, maxBps: Int): JSONObject {
         val video = mutableListOf("h264")
         val codecProfiles = JSONArray()
         val candidates = listOf(
@@ -402,8 +450,8 @@ class EmbyClient(ctx: Context) {
 
         return JSONObject()
             .put("Name", "DaniviaFlix")
-            .put("MaxStreamingBitrate", 200_000_000)
-            .put("MaxStaticBitrate", 200_000_000)
+            .put("MaxStreamingBitrate", maxBps)
+            .put("MaxStaticBitrate", maxBps)
             .put("MusicStreamingTranscodingBitrate", 192_000)
             .put("DirectPlayProfiles", direct)
             .put("TranscodingProfiles", transcode)
@@ -417,17 +465,19 @@ class EmbyClient(ctx: Context) {
         else -> "application/x-subrip"
     }
 
-    suspend fun planPlayback(item: Item, startMs: Long, forceTranscode: Boolean): PlayPlan {
+    /** maxMbps = 0: automática (la mejor calidad posible). Si no, tope en Mbps elegido por el usuario. */
+    suspend fun planPlayback(item: Item, startMs: Long, forceTranscode: Boolean, maxMbps: Int = 0): PlayPlan {
         val s = session ?: throw IOException("Sin sesión")
+        val maxBps = if (maxMbps > 0) maxMbps * 1_000_000 else 200_000_000
         val q = u(
             "/Items/${item.id}/PlaybackInfo",
             "UserId" to s.userId,
             "StartTimeTicks" to (startMs * 10_000).toString(),
-            "MaxStreamingBitrate" to "200000000",
+            "MaxStreamingBitrate" to maxBps.toString(),
             "IsPlayback" to "true",
             "AutoOpenLiveStream" to "true",
         )
-        val j = JSONObject(call("POST", q, JSONObject().put("DeviceProfile", deviceProfile(forceTranscode))))
+        val j = JSONObject(call("POST", q, JSONObject().put("DeviceProfile", deviceProfile(forceTranscode, maxBps))))
         val sources = j.optJSONArray("MediaSources")
         if (sources == null || sources.length() == 0) throw IOException("El servidor no devolvió ningún archivo para este vídeo.")
         val ms = sources.getJSONObject(0)
@@ -465,10 +515,22 @@ class EmbyClient(ctx: Context) {
         }
 
         val subs = mutableListOf<SubInfo>()
+        var info = ""
         val streams = ms.optJSONArray("MediaStreams")
         if (streams != null) {
             for (i in 0 until streams.length()) {
                 val st = streams.getJSONObject(i)
+                if (st.optString("Type") == "Video" && info.isEmpty()) {
+                    val h = st.optInt("Height")
+                    val res = when {
+                        h >= 2000 -> "4K"
+                        h >= 1000 -> "1080p"
+                        h >= 700 -> "720p"
+                        h > 0 -> "${h}p"
+                        else -> ""
+                    }
+                    info = listOf(res, st.optString("Codec").uppercase()).filter { it.isNotEmpty() }.joinToString(" · ")
+                }
                 if (st.optString("Type") == "Subtitle" && st.optString("DeliveryMethod") == "External" &&
                     st.optString("DeliveryUrl").isNotEmpty()
                 ) {
@@ -481,7 +543,7 @@ class EmbyClient(ctx: Context) {
                 }
             }
         }
-        return PlayPlan(url, method, psid, msId, startMs, subs)
+        return PlayPlan(url, method, psid, msId, startMs, subs, info)
     }
 
     /** kind: "start" | "progress" | "stop" — así Emby recuerda por dónde vas ("Continuar viendo"). */
