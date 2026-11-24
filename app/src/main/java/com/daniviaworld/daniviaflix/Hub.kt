@@ -1,5 +1,6 @@
 package com.daniviaworld.daniviaflix
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -42,7 +43,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -105,8 +112,11 @@ private fun HubCard(item: HubItem, isTv: Boolean, modifier: Modifier) {
             .focusRing(focused, shape)
             .background(Brush.linearGradient(listOf(item.c1, item.c2)))
     ) {
-        // Tus carátulas (o logos de canales) en abanico.
-        if (item.images.isNotEmpty()) {
+        if (item.logos) {
+            TvArt(Modifier.align(Alignment.TopEnd).padding(14.dp).size(width = 112.dp, height = 88.dp))
+        }
+        // Tus carátulas en abanico.
+        if (!item.logos && item.images.isNotEmpty()) {
             val urls = item.images.take(3)
             Box(
                 Modifier.align(Alignment.TopEnd).padding(14.dp)
@@ -144,6 +154,46 @@ private fun HubCard(item: HubItem, isTv: Boolean, modifier: Modifier) {
             Text(item.title, fontSize = if (isTv) 22.sp else 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
             if (item.sub.isNotEmpty()) Text(item.sub, fontSize = 13.sp, color = Color(0xE6FFFFFF))
         }
+    }
+}
+
+/** Dibujo de una tele con antenas y botón de play, para la tarjeta de TV. */
+@Composable
+private fun TvArt(modifier: Modifier) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 3.dp.toPx()
+        // antenas
+        drawLine(Color.White, Offset(w * 0.5f, h * 0.2f), Offset(w * 0.28f, h * 0.02f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(Color.White, Offset(w * 0.5f, h * 0.2f), Offset(w * 0.72f, h * 0.02f), strokeWidth = sw, cap = StrokeCap.Round)
+        // cuerpo
+        val top = h * 0.2f
+        val bh = h * 0.7f
+        drawRoundRect(Color(0xFF0B1220), Offset(0f, top), Size(w, bh), CornerRadius(14.dp.toPx()))
+        drawRoundRect(Color.White, Offset(0f, top), Size(w, bh), CornerRadius(14.dp.toPx()), style = Stroke(sw))
+        // pantalla
+        val inset = 8.dp.toPx()
+        drawRoundRect(
+            Brush.linearGradient(listOf(Color(0xFF22D3EE), Color(0xFF7B2FF7)), Offset(0f, top), Offset(w, top + bh)),
+            Offset(inset, top + inset), Size(w - inset * 2, bh - inset * 2), CornerRadius(8.dp.toPx()),
+        )
+        // play
+        val cx = w * 0.5f
+        val cy = top + bh * 0.5f
+        val r = bh * 0.2f
+        val tri = Path().apply {
+            moveTo(cx - r * 0.7f, cy - r)
+            lineTo(cx + r, cy)
+            lineTo(cx - r * 0.7f, cy + r)
+            close()
+        }
+        drawPath(tri, Color.White)
+        // punto "en directo"
+        drawCircle(Color(0xFFFF3B3B), 4.dp.toPx(), Offset(w - inset - 7.dp.toPx(), top + inset + 8.dp.toPx()))
+        // pies
+        drawLine(Color.White, Offset(w * 0.25f, h * 0.97f), Offset(w * 0.35f, h * 0.9f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(Color.White, Offset(w * 0.75f, h * 0.97f), Offset(w * 0.65f, h * 0.9f), strokeWidth = sw, cap = StrokeCap.Round)
     }
 }
 
@@ -283,16 +333,6 @@ fun HubScreen(
                 Brush.radialGradient(listOf(Coral.copy(alpha = 0.25f), Color.Transparent), center = Offset(2200f, 2400f), radius = 1600f)
             )
         )
-        Text(
-            "DANIVIA\nFLIX",
-            modifier = Modifier.align(Alignment.Center),
-            fontSize = if (isTv) 150.sp else 84.sp,
-            lineHeight = if (isTv) 140.sp else 80.sp,
-            fontWeight = FontWeight.ExtraBold,
-            textAlign = TextAlign.Center,
-            color = Color.White.copy(alpha = 0.13f),
-        )
-
         Column(Modifier.fillMaxSize().padding(horizontal = pad, vertical = 18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 DMark(if (isTv) 40.dp else 32.dp)
@@ -319,9 +359,21 @@ fun HubScreen(
                 ) { items.forEach { HubCard(it, false, Modifier.fillMaxWidth().height(170.dp)) } }
             }
 
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.Center) {
-                Text("By ", color = TextMuted, fontSize = 13.sp)
-                Text("DaniviaTV", color = Amber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Column(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "DANIVIAFLIX",
+                    style = TextStyle(
+                        brush = Brush.horizontalGradient(listOf(Amber, Coral, Violet)),
+                        fontSize = if (isTv) 60.sp else 34.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = if (isTv) 14.sp else 7.sp,
+                    ),
+                    maxLines = 1,
+                )
+                Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.Center) {
+                    Text("By ", color = TextMuted, fontSize = 14.sp)
+                    Text("DaniviaTV", color = Amber, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
             }
         }
     }

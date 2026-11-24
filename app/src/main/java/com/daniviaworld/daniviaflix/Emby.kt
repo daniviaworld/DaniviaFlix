@@ -287,6 +287,32 @@ class EmbyClient(ctx: Context) {
     suspend fun item(id: String): Item =
         JSONObject(call("GET", u("/Users/${uid()}/Items/$id", "Fields" to fields))).toItem()
 
+    /** Tráilers guardados en tu Emby para esta película o serie. */
+    suspend fun localTrailers(id: String): List<Item> = try {
+        val txt = call("GET", u("/Users/${uid()}/Items/$id/LocalTrailers", "Fields" to fields)).trim()
+        if (txt.startsWith("[")) {
+            val a = org.json.JSONArray(txt)
+            (0 until a.length()).map { a.getJSONObject(it).toItem() }
+        } else parseItems(txt)
+    } catch (ex: Exception) {
+        emptyList()
+    }
+
+    /** Enlace de tráiler externo (p. ej. YouTube) si Emby lo trae en la ficha. */
+    suspend fun remoteTrailer(id: String): String? = try {
+        val a = JSONObject(call("GET", u("/Users/${uid()}/Items/$id"))).optJSONArray("RemoteTrailers")
+        if (a != null && a.length() > 0) a.getJSONObject(0).optString("Url").takeIf { it.startsWith("http") } else null
+    } catch (ex: Exception) {
+        null
+    }
+
+    /** Siguiente episodio por ver de una serie (o el que dejaste a medias). */
+    suspend fun nextUp(seriesId: String): Item? = try {
+        parseItems(call("GET", u("/Shows/NextUp", "UserId" to uid(), "SeriesId" to seriesId, "Limit" to "1", "Fields" to fields))).firstOrNull()
+    } catch (ex: Exception) {
+        null
+    }
+
     suspend fun seasons(seriesId: String): List<Item> = parseItems(
         call("GET", u("/Shows/$seriesId/Seasons", "UserId" to uid(), "Fields" to fields))
     )

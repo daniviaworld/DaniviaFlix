@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -318,8 +319,17 @@ fun DetailScreen(
     var season by remember { mutableStateOf<Item?>(null) }
     var episodes by remember { mutableStateOf<List<Item>>(emptyList()) }
     var children by remember { mutableStateOf<List<Item>>(emptyList()) }
+    var trailers by remember { mutableStateOf<List<Item>>(emptyList()) }
+    var remoteTrailer by remember { mutableStateOf<String?>(null) }
+    var nextEp by remember { mutableStateOf<Item?>(null) }
+    val ctx = LocalContext.current
 
     LaunchedEffect(base.id) {
+        if (base.type == "Movie" || base.type == "Series" || base.type == "Video") {
+            trailers = client.localTrailers(base.id)
+            if (trailers.isEmpty()) remoteTrailer = client.remoteTrailer(base.id)
+        }
+        if (base.type == "Series") nextEp = client.nextUp(base.id)
         try {
             item = client.item(base.id)
         } catch (e: Exception) {
@@ -379,14 +389,38 @@ fun DetailScreen(
                         item.rating?.let { "★ %.1f".format(it) },
                     ).joinToString("   ·   ")
                     if (meta.isNotEmpty()) Text(meta, color = TextMuted, fontSize = 14.sp)
-                    if (playable) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (playable) {
                             if (item.resumeMs > 30_000) {
-                                Button(onClick = { onPlay(item, item.resumeMs) }) { Text("Reanudar ${fmt(item.resumeMs)}", fontWeight = FontWeight.Bold) }
+                                Button(onClick = { onPlay(item, item.resumeMs) }) {
+                                    Text("Continuar por donde lo dejaste · ${fmt(item.resumeMs)}", fontWeight = FontWeight.Bold)
+                                }
                                 OutlinedButton(onClick = { onPlay(item, 0) }) { Text("Desde el principio") }
                             } else {
                                 Button(onClick = { onPlay(item, 0) }) { Text("▶  Reproducir", fontWeight = FontWeight.Bold) }
                             }
+                        }
+                        val ne = nextEp ?: episodes.firstOrNull()
+                        if (item.type == "Series" && ne != null) {
+                            val code = "T${ne.seasonNo ?: 1}·E${ne.episodeNo ?: 1}"
+                            val started = ne.resumeMs > 30_000 || (ne.seasonNo ?: 1) > 1 || (ne.episodeNo ?: 1) > 1
+                            Button(onClick = { onPlay(ne, if (ne.resumeMs > 30_000) ne.resumeMs else 0L) }) {
+                                Text(if (started) "Continuar $code" else "▶  Reproducir $code", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (trailers.isNotEmpty()) {
+                            OutlinedButton(onClick = { onPlay(trailers.first(), 0) }) { Text("Tráiler") }
+                        } else if (remoteTrailer != null) {
+                            OutlinedButton(onClick = {
+                                try {
+                                    ctx.startActivity(
+                                        android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(remoteTrailer))
+                                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                } catch (ex: Exception) {
+                                    // sin aplicación para abrir el enlace
+                                }
+                            }) { Text("Tráiler") }
                         }
                     }
                     OutlinedButton(onClick = {
