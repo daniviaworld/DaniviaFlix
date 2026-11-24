@@ -83,8 +83,8 @@ fun DMark(dp: Dp, modifier: Modifier = Modifier) {
 @Composable
 fun Wordmark(fontSize: TextUnit) {
     Row {
-        Text("DANIVIA", fontSize = fontSize, fontWeight = FontWeight.Bold, letterSpacing = 0.15.em, color = Color.White)
-        Text("FLIX", fontSize = fontSize, fontWeight = FontWeight.Light, letterSpacing = 0.15.em, color = Amber)
+        Text("DANIVIA", fontSize = fontSize, fontWeight = FontWeight.Bold, letterSpacing = 0.15.em, color = Color.White, maxLines = 1, softWrap = false)
+        Text("FLIX", fontSize = fontSize, fontWeight = FontWeight.Light, letterSpacing = 0.15.em, color = Amber, maxLines = 1, softWrap = false)
     }
 }
 

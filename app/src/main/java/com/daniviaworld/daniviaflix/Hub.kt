@@ -113,33 +113,27 @@ private fun HubCard(item: HubItem, isTv: Boolean, modifier: Modifier) {
             .background(Brush.linearGradient(listOf(item.c1, item.c2)))
     ) {
         if (item.logos) {
-            TvArt(Modifier.align(Alignment.TopEnd).padding(14.dp).size(width = 112.dp, height = 88.dp))
-        }
-        // Tus carátulas en abanico.
-        if (!item.logos && item.images.isNotEmpty()) {
-            val urls = item.images.take(3)
-            Box(
-                Modifier.align(Alignment.TopEnd).padding(14.dp)
-                    .size(width = pw + step * 2, height = ph + 20.dp)
+            TvWaves(Modifier.fillMaxSize())
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(16.dp).clip(RoundedCornerShape(12.dp))
+                    .background(Color(0x66000000)).padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                // orden de dibujo: izquierda, derecha y, encima, la del centro
-                val order = listOf(0, 2, 1).filter { it < urls.size }
-                order.forEach { i ->
-                    val tilt = when (i) { 0 -> -8f; 2 -> 8f; else -> 0f }
-                    val dy = if (i == 1) 0.dp else 16.dp
-                    Box(
-                        Modifier.align(Alignment.TopStart).offset(x = step * i, y = dy).rotate(tilt)
-                            .size(pw, ph).clip(RoundedCornerShape(10.dp))
-                            .background(if (item.logos) Color(0xF2FFFFFF) else Surface2)
-                    ) {
-                        AsyncImage(
-                            model = urls[i], contentDescription = null,
-                            contentScale = if (item.logos) ContentScale.Fit else ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize().padding(if (item.logos) 6.dp else 0.dp),
-                        )
-                    }
-                }
+                Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFF3B3B)))
+                Spacer(Modifier.width(6.dp))
+                Text("EN DIRECTO", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
+        } else if (item.images.isNotEmpty()) {
+            // Imagen de fondo de tu propia biblioteca, con un velo de color de la tarjeta.
+            AsyncImage(
+                model = item.images.first(), contentDescription = null,
+                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.linearGradient(listOf(item.c1.copy(alpha = 0.45f), item.c2.copy(alpha = 0.45f)))
+                )
+            )
         }
         Box(
             Modifier.fillMaxWidth().fillMaxHeight(0.55f).align(Alignment.BottomStart)
@@ -157,48 +151,24 @@ private fun HubCard(item: HubItem, isTv: Boolean, modifier: Modifier) {
     }
 }
 
-/** Dibujo de una tele con antenas y botón de play, para la tarjeta de TV. */
+/** Ondas de emisión como fondo de la tarjeta de TV. */
 @Composable
-private fun TvArt(modifier: Modifier) {
+private fun TvWaves(modifier: Modifier) {
     Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        val sw = 3.dp.toPx()
-        // antenas
-        drawLine(Color.White, Offset(w * 0.5f, h * 0.2f), Offset(w * 0.28f, h * 0.02f), strokeWidth = sw, cap = StrokeCap.Round)
-        drawLine(Color.White, Offset(w * 0.5f, h * 0.2f), Offset(w * 0.72f, h * 0.02f), strokeWidth = sw, cap = StrokeCap.Round)
-        // cuerpo
-        val top = h * 0.2f
-        val bh = h * 0.7f
-        drawRoundRect(Color(0xFF0B1220), Offset(0f, top), Size(w, bh), CornerRadius(14.dp.toPx()))
-        drawRoundRect(Color.White, Offset(0f, top), Size(w, bh), CornerRadius(14.dp.toPx()), style = Stroke(sw))
-        // pantalla
-        val inset = 8.dp.toPx()
-        drawRoundRect(
-            Brush.linearGradient(listOf(Color(0xFF22D3EE), Color(0xFF7B2FF7)), Offset(0f, top), Offset(w, top + bh)),
-            Offset(inset, top + inset), Size(w - inset * 2, bh - inset * 2), CornerRadius(8.dp.toPx()),
-        )
-        // play
-        val cx = w * 0.5f
-        val cy = top + bh * 0.5f
-        val r = bh * 0.2f
-        val tri = Path().apply {
-            moveTo(cx - r * 0.7f, cy - r)
-            lineTo(cx + r, cy)
-            lineTo(cx - r * 0.7f, cy + r)
-            close()
+        val c = Offset(size.width * 0.78f, size.height * 0.36f)
+        val base = size.height * 0.16f
+        for (i in 1..5) {
+            drawCircle(
+                Color.White.copy(alpha = 0.22f - i * 0.03f), base * i, c,
+                style = Stroke(2.dp.toPx()),
+            )
         }
-        drawPath(tri, Color.White)
-        // punto "en directo"
-        drawCircle(Color(0xFFFF3B3B), 4.dp.toPx(), Offset(w - inset - 7.dp.toPx(), top + inset + 8.dp.toPx()))
-        // pies
-        drawLine(Color.White, Offset(w * 0.25f, h * 0.97f), Offset(w * 0.35f, h * 0.9f), strokeWidth = sw, cap = StrokeCap.Round)
-        drawLine(Color.White, Offset(w * 0.75f, h * 0.97f), Offset(w * 0.65f, h * 0.9f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawCircle(Color.White.copy(alpha = 0.9f), 7.dp.toPx(), c)
     }
 }
 
 @Composable
-private fun AccountChip(name: String, initial: String, onClick: () -> Unit) {
+private fun AccountChip(name: String, initial: String, showName: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(24.dp)
     Row(
@@ -208,15 +178,17 @@ private fun AccountChip(name: String, initial: String, onClick: () -> Unit) {
             .clip(shape)
             .focusRing(focused, shape)
             .background(Color(0x1FFFFFFF))
-            .padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = 4.dp, end = if (showName) 12.dp else 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier.size(36.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Amber, Coral))),
             contentAlignment = Alignment.Center,
         ) { Text(initial, fontWeight = FontWeight.Bold, color = Color(0xFF1A1000)) }
-        Spacer(Modifier.width(8.dp))
-        Text(name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 120.dp))
+        if (showName) {
+            Spacer(Modifier.width(8.dp))
+            Text(name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 120.dp))
+        }
     }
 }
 
@@ -261,7 +233,9 @@ fun HubScreen(
                     launch {
                         try {
                             movieCount = mv.sumOf { client.countIn(it) }
-                            moviePosters = mv.firstOrNull()?.let { client.sample(it) }.orEmpty().mapNotNull { client.poster(it, 300) }
+                            moviePosters = mv.firstOrNull()?.let { client.sample(it) }.orEmpty().let { s ->
+                                s.mapNotNull { client.image(it, "Backdrop", 720) }.ifEmpty { s.mapNotNull { client.poster(it, 400) } }
+                            }
                         } catch (e: Exception) {
                             // sin carátulas
                         }
@@ -269,7 +243,9 @@ fun HubScreen(
                     launch {
                         try {
                             seriesCount = sv.sumOf { client.countIn(it) }
-                            seriesPosters = sv.firstOrNull()?.let { client.sample(it) }.orEmpty().mapNotNull { client.poster(it, 300) }
+                            seriesPosters = sv.firstOrNull()?.let { client.sample(it) }.orEmpty().let { s ->
+                                s.mapNotNull { client.image(it, "Backdrop", 720) }.ifEmpty { s.mapNotNull { client.poster(it, 400) } }
+                            }
                         } catch (e: Exception) {
                             // sin carátulas
                         }
@@ -337,8 +313,8 @@ fun HubScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 DMark(if (isTv) 40.dp else 32.dp)
                 Spacer(Modifier.width(10.dp))
-                Box(Modifier.weight(1f)) { Wordmark(if (isTv) 22.sp else 14.sp) }
-                if (account != null) AccountChip(account.userName, account.initial, onAccounts)
+                Box(Modifier.weight(1f)) { if (isTv) Wordmark(22.sp) }
+                if (account != null) AccountChip(account.userName, account.initial, isTv, onAccounts)
                 Spacer(Modifier.width(8.dp))
                 NavIcon(Icons.Filled.Settings, "Ajustes") { onSettings() }
             }
@@ -354,9 +330,9 @@ fun HubScreen(
                 Spacer(Modifier.weight(1f))
             } else {
                 Column(
-                    Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 18.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) { items.forEach { HubCard(it, false, Modifier.fillMaxWidth().height(170.dp)) } }
+                    Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) { items.forEach { HubCard(it, false, Modifier.fillMaxWidth().height(140.dp)) } }
             }
 
             Column(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -364,9 +340,9 @@ fun HubScreen(
                     "DANIVIAFLIX",
                     style = TextStyle(
                         brush = Brush.horizontalGradient(listOf(Amber, Coral, Violet)),
-                        fontSize = if (isTv) 60.sp else 34.sp,
+                        fontSize = if (isTv) 60.sp else 28.sp,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = if (isTv) 14.sp else 7.sp,
+                        letterSpacing = if (isTv) 14.sp else 5.sp,
                     ),
                     maxLines = 1,
                 )
